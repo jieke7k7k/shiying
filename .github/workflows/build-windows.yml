@@ -1,0 +1,26 @@
+name: Build Shiying Windows
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pywebview
+      - name: Build with PyInstaller (onedir, windowed)
+        run: |
+          pyinstaller --noconfirm --windowed --onedir --name Shiying-3.2.0 --add-data "index.html;." --add-data "demo_images;demo_images" --add-data "faces_manifest.json;." --add-data "models;models" --hidden-import app_paths --hidden-import scan --hidden-import face_clustering --hidden-import trash_util --hidden-import instance_lock app_native.py
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Shiying-3.2.0-win64
+          path: dist/Shiying-3.2.0
