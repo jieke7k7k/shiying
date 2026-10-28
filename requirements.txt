@@ -1,0 +1,21 @@
+# PhotoOrganizer-3.2.0 · 本地照片整理与去重（纯本地运行）
+Pillow>=10
+# send2trash 用于把删除文件送进系统回收站；若未安装，工具会自动改走
+# 工具包内的 .trash_backup 隔离文件夹（同样不会直接彻底删除）。
+# 注意：隔离区与源文件不在同一块磁盘时会拒绝慢速拷贝，所以移动硬盘
+# 上的照片建议安装 send2trash，让文件进它所在磁盘的系统回收站。
+send2trash>=1.8
+# ---- 可选：真实人脸聚类（不装也能用，界面改用测试分组兜底）----
+# 真实人脸聚类走 OpenCV 原生 YuNet + SFace（预编译轮子，零编译），
+# 需要另装 opencv-python，并确认 models/ 里已有模型文件：
+#   face_detection_yunet_2023mar_int8.onnx / .onnx（YuNet）
+#   face_recognition_sface_2021dec_int8.onnx / .onnx（SFace）
+# 说明（3.2.0 更正）：INT8 模型已在 OpenCV 5.0 下实测创建成功，
+# 不再沿用“SFace INT8 解析失败、不能用 int8”的旧说法；但真实人脸
+# 聚类尚未在 Windows 真机实测，效果须以真机结果为准。
+# 如需启用，手动运行一次（不在本文件里强制安装，避免大轮子拖慢首次启动）：
+#   pip install opencv-python
+# ---- 可选：原生无边框窗口（app_native.py 会优先使用）----
+# 装了 pywebview 就用系统 WebView2/原生窗口；没装则自动回退 Chrome/Edge
+# 的 --app 应用窗口模式（同样不显示地址栏）。
+#   pip install pywebview

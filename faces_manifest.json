@@ -1,0 +1,19 @@
+{
+  "note": "测试分组专用：生成时已知的人像身份，仅用于演练分组逻辑，不是真实人脸识别结果。",
+  "groups": {
+    "test_person_a": {
+      "label": "测试人物 A",
+      "members": [
+        "base_park.jpg",
+        "portrait_a2.jpg"
+      ]
+    },
+    "test_person_b": {
+      "label": "测试人物 B",
+      "members": [
+        "base_beach.jpg",
+        "portrait_b2.jpg"
+      ]
+    }
+  }
+}

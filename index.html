@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拾影 · 本地照片整理与去重</title>
+<style>
+  :root{
+    --bg:#FFFFFF;
+    --surface:#FAFAFA;
+    --ink:#111111;
+    --muted:#737373;
+    --line:#E5E5E5;
+    --hover:#F2F2F2;
+  }
+  *{ box-sizing:border-box; }
+  html{ -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+  body{ margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+    font-size:14px; line-height:1.6; }
+  header{ position:sticky; top:0; z-index:20; background:rgba(255,255,255,.94);
+    backdrop-filter:saturate(180%) blur(12px); border-bottom:1px solid var(--line); }
+  .wrap{ max-width:1280px; margin:0 auto; padding:0 32px; }
+  .head-row{ display:flex; align-items:center; gap:16px; padding:22px 0 18px; flex-wrap:wrap; }
+  .logo{ width:36px; height:36px; border:1px solid var(--ink); border-radius:8px;
+    display:flex; align-items:center; justify-content:center; font-size:14px;
+    font-weight:600; letter-spacing:.02em; flex:none; }
+  h1{ font-size:16px; font-weight:600; margin:0; letter-spacing:-.01em; line-height:1.4; }
+  .sub{ color:var(--muted); font-size:12px; margin-top:4px; }
+  .badge{ display:inline-block; font-size:11px; padding:0; border-radius:0;
+    background:none; color:var(--muted); font-weight:500; letter-spacing:.04em;
+    margin-left:10px; vertical-align:middle; }
+  .badge.warn{ background:none; color:var(--muted); }
+  .spacer{ flex:1; }
+  button, input, select{ font:inherit; }
+  button{ cursor:pointer; border:1px solid var(--line); background:#fff; color:var(--ink);
+    border-radius:8px; padding:7px 14px; font-size:13px;
+    transition:background .18s ease, border-color .18s ease, color .18s ease; }
+  button:hover{ background:var(--hover); border-color:#D4D4D4; }
+  button:active{ background:#EDEDED; }
+  button:focus-visible{ outline:1px solid var(--ink); outline-offset:2px; }
+  button.primary{ background:var(--ink); color:#fff; border-color:var(--ink); }
+  button.primary:hover{ background:#000; border-color:#000; }
+  button.danger{ background:var(--ink); color:#fff; border-color:var(--ink); }
+  button.danger:hover{ background:#000; border-color:#000; }
+  button.small{ padding:5px 10px; font-size:12px; }
+  button:disabled{ opacity:.5; cursor:not-allowed; }
+  button.loading::after{ content:""; display:inline-block; width:10px; height:10px;
+    margin-left:8px; border:1px solid currentColor; border-right-color:transparent;
+    border-radius:50%; animation:spin .7s linear infinite; vertical-align:-1px; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .basket-note{ color:var(--muted); font-size:12px; margin-top:6px; line-height:1.6; }
+  .basket-item.stale{ background:var(--surface); }
+  input[type=text]{ border:1px solid var(--line); border-radius:8px; padding:8px 12px;
+    background:#fff; font-size:13px; min-width:200px;
+    transition:border-color .18s ease; }
+  input[type=text]:focus{ outline:none; border-color:var(--ink); }
+  input[type=text]::placeholder{ color:#A3A3A3; }
+  .toolbar{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; padding:0 0 20px; }
+  .toolbar input.path{ min-width:300px; flex:1; }
+  main{ padding:40px 0 96px; }
+  .bento{ display:grid; grid-template-columns:repeat(4,1fr); gap:24px; margin-bottom:32px; }
+  @media (max-width:900px){ .bento{ grid-template-columns:repeat(2,1fr); } }
+  .stat{ background:#fff; border:1px solid var(--line); border-radius:12px;
+    padding:24px; transition:border-color .2s ease, background .2s ease; }
+  .stat:hover{ border-color:#D4D4D4; background:#FCFCFC; }
+  .stat .num{ font-size:26px; font-weight:600; margin-top:8px; letter-spacing:-.02em; }
+  .stat .lbl{ color:var(--muted); font-size:12px; font-weight:500; letter-spacing:.02em; }
+  section.card{ background:var(--surface); border:1px solid var(--line); border-radius:12px;
+    padding:32px; margin-bottom:32px; }
+  section.card h2{ margin:0 0 8px; font-size:16px; font-weight:600; letter-spacing:.01em; }
+  section.card p.hint{ color:var(--muted); font-size:12px; margin:0 0 24px;
+    line-height:1.7; max-width:820px; }
+  .pills{ display:flex; gap:20px; flex-wrap:wrap; margin-bottom:24px;
+    border-bottom:1px solid var(--line); }
+  .pill{ border:0; background:none; color:var(--muted); border-radius:0;
+    padding:0 0 10px; font-size:12px; font-weight:500; border-bottom:1px solid transparent;
+    margin-bottom:-1px; transition:color .18s ease, border-color .18s ease; }
+  .pill:hover{ background:none; color:var(--ink); border-color:transparent; }
+  .pill.active{ background:none; color:var(--ink); border-color:var(--ink); }
+  .timeline h3{ font-size:12px; font-weight:600; margin:32px 0 14px; color:var(--muted);
+    letter-spacing:.04em; }
+  .timeline:first-child h3{ margin-top:0; }
+  .grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:24px; }
+  @media (max-width:900px){ .grid{ grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:560px){ .grid{ grid-template-columns:1fr; } }
+  .photo{ border:1px solid var(--line); border-radius:10px; overflow:hidden; background:#fff;
+    transition:border-color .2s ease, transform .2s ease; cursor:pointer; }
+  .photo:hover{ transform:translateY(-2px); border-color:#111; }
+  .photo img{ width:100%; height:180px; object-fit:cover; display:block; background:var(--surface); }
+  .photo .meta{ padding:14px 16px 16px; }
+  .photo .name{ font-size:13px; font-weight:500; word-break:break-all; }
+  .photo .small{ color:var(--muted); font-size:11px; margin-top:4px; }
+  .tag{ display:inline-block; font-size:11px; padding:0; border-radius:0;
+    background:none; color:var(--muted); margin-right:12px; letter-spacing:.02em; }
+  .tag.burst, .tag.shot, .tag.noexif{ background:none; color:var(--muted); }
+  .pk{ border:1px solid var(--line); border-radius:10px; padding:24px; margin-bottom:24px;
+    background:#fff; }
+  .pk .pk-head{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+  .pk .vs{ display:grid; grid-template-columns:1fr 48px 1fr; gap:16px; align-items:start; }
+  @media (max-width:700px){ .pk .vs{ grid-template-columns:1fr; } .pk .vs .vs-mid{ text-align:left; padding-top:0; } }
+  .vs-mid{ text-align:center; font-weight:500; color:#A3A3A3; padding-top:80px;
+    font-size:12px; letter-spacing:.08em; }
+  .keep-badge{ background:none; color:var(--ink); font-size:11px; font-weight:600;
+    padding:0; border-radius:0; letter-spacing:.04em; }
+  .color-badge{ background:none; color:var(--muted); font-size:11px; font-weight:500;
+    padding:0; border-radius:0; }
+  .discard{ border:1px solid var(--line); border-radius:10px; padding:14px;
+    margin-bottom:14px; background:var(--surface); }
+  .face{ display:flex; gap:20px; align-items:center; border:1px solid var(--line);
+    border-radius:10px; padding:20px; margin-bottom:16px; background:#fff; }
+  .avatar{ width:56px; height:56px; border-radius:50%; object-fit:cover; background:var(--surface);
+    border:1px solid var(--line); flex:none; }
+  .basket-item{ display:flex; gap:16px; align-items:center; border:1px solid var(--line);
+    border-radius:10px; padding:14px 16px; margin-bottom:12px; background:#fff; }
+  .basket-item img{ width:64px; height:64px; object-fit:cover; border-radius:8px; background:var(--surface); }
+  .confirm-box{ border:1px solid var(--ink); border-radius:10px; padding:24px;
+    background:var(--surface); margin-top:20px; }
+  .toast-wrap{ position:fixed; right:24px; bottom:24px; z-index:50; display:flex;
+    flex-direction:column; gap:10px; }
+  .toast{ background:var(--ink); color:#fff; padding:12px 16px; border-radius:8px;
+    box-shadow:0 8px 24px rgba(0,0,0,.12); font-size:13px; max-width:360px; }
+  .empty{ color:var(--muted); text-align:center; padding:56px 16px; font-size:13px; }
+  .modal-bg{ position:fixed; inset:0; background:rgba(17,17,17,.4); z-index:60;
+    display:flex; align-items:center; justify-content:center; padding:24px;
+    backdrop-filter:blur(4px); }
+  .modal{ background:#fff; border:1px solid var(--line); border-radius:12px;
+    max-width:860px; width:100%; padding:24px; max-height:90vh; overflow:auto; }
+  .modal img{ width:100%; border-radius:8px; background:var(--surface); }
+  .stop-overlay{ position:fixed; inset:0; background:rgba(255,255,255,.98); z-index:100;
+    display:flex; align-items:center; justify-content:center; text-align:center; padding:24px; }
+  details{ color:var(--muted); font-size:12px; line-height:1.8; }
+  details summary{ cursor:pointer; color:var(--ink); font-weight:600; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="head-row">
+      <div class="logo">P</div>
+      <div>
+        <h1>拾影<span class="badge">纯本地 · 零外部请求 · v3.2.0</span></h1>
+        <div class="sub">双击打开，用完关掉，不驻留后台。删除只进回收站或隔离区，绝不直接彻底删除。</div>
+      </div>
+      <div class="spacer"></div>
+      <button id="btn-stop" title="彻底停止本地服务">停止服务</button>
+    </div>
+    <div class="toolbar">
+      <button id="tab-demo" class="pill active">演示数据</button>
+      <button id="tab-custom" class="pill">我的文件夹</button>
+      <input id="input-path" class="path" type="text" placeholder="输入本地文件夹路径，例如：D:\照片 或 /home/你的照片">
+      <button id="btn-pick">浏览选择文件夹</button>
+      <button id="btn-scan" class="primary">扫描这个文件夹</button>
+      <button id="btn-demo">加载演示图</button>
+      <input id="input-search" type="text" placeholder="搜索：文件名 / 人名 / 拍摄日期">
+      <button id="btn-export" title="导出的清单只含相对路径，不含完整本机路径">导出清单（不含完整路径）</button>
+      <button id="btn-reset" title="清空待删篓、改名与筛选（不删除任何文件）">一键重置</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="face-banner"></div>
+  <div id="data-dir-note"></div>
+
+  <div class="bento" id="stats"></div>
+
+  <section class="card">
+    <h2>时光画廊</h2>
+    <p class="hint">按拍摄日期分组。胶囊筛选只切换视图，不删除任何照片；点照片可看原图。搜索匹配文件名、人物名与拍摄日期。</p>
+    <div class="pills" id="pills">
+      <button class="pill active" data-filter="all">全部</button>
+      <button class="pill" data-filter="dated">带拍摄时间</button>
+      <button class="pill" data-filter="burst">连拍保护组</button>
+      <button class="pill" data-filter="screenshot">手机截图</button>
+      <button class="pill" data-filter="no_exif">无拍摄时间</button>
+    </div>
+    <div id="gallery"></div>
+  </section>
+
+  <section class="card">
+    <h2>双核去重 PK 台</h2>
+    <p class="hint">左侧为推荐保留，右侧为淘汰候选。点“移入待删篓”只是暂存，进篓后仍需二次确认才会删除；连拍组默认受保护，不进待删篓。</p>
+    <div id="pk"></div>
+    <h2 style="margin-top:28px;">连拍保护组</h2>
+    <p class="hint">以下分组默认保护，只展示、不建议删除。</p>
+    <div id="bursts"></div>
+  </section>
+
+  <section class="card">
+    <h2>人物墙</h2>
+    <p class="hint">点输入框可直接改名，改名保存在本机浏览器里（换电脑不共享）。人物分组的诚实状态见顶部横幅。</p>
+    <div id="faces"></div>
+  </section>
+
+  <section class="card">
+    <h2>待删确认篓</h2>
+    <p class="hint">篓子里的文件还没删。点“二次确认删除”后会再弹一次确认框，只有你第二次点头，文件才会被移入系统回收站（若系统不支持，则移入工具包内的 .trash_backup 隔离文件夹），绝不直接彻底删除。</p>
+    <div id="basket"></div>
+    <div id="confirm-box" style="display:none;"></div>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>规则说明（连拍 / 推荐 / 色彩变体 / 删除 / 关闭）</summary>
+      <p id="rules" style="white-space:pre-wrap;"></p>
+      <p>关闭方式：点顶部“停止服务”，窗口会连同本地服务一起关闭；在启动终端按 Ctrl+C 也会干净停止。服务只监听本机 127.0.0.1，不对外开放。想再用时，重新打开 Shiying-3.2.0（app_native）即可。</p>
+      <p>导出说明：导出的清单只含相对扫描文件夹的相对路径与文件夹名称，不含完整本机路径、用户名或盘符；删除仍只在待删篓里二次确认后执行。</p>
+      <p>人脸诚实说明：Haar 级联只能框出脸，做不了“认出同一个人”。真实人脸聚类必须走特征向量 + 聚类路线；本机若无可用模型，界面显示的即为测试分组或无分组，绝不冒充真实人脸识别。合成卡通测试图不能验证真实人脸聚类，真实人脸聚类需用真实照片在真机环境验证。</p>
+    </details>
+  </section>
+</main>
+
+<div class="toast-wrap" id="toasts"></div>
+<div id="modal-root"></div>
+
+<script>
+const LS_BASKET = "photoTool.basket.v2";
+const LS_BASKET_V1 = "photoTool.basket.v1";
+const LS_NAMES = "photoTool.names.v1";
+// v3.2.0：分批渲染的每批大小。画廊每批 100 张，PK 台与
+// 连拍组每批 20 组；点“加载更多”再往后翻，几千张也不会一次建几千个 DOM 节点。
+const GALLERY_BATCH = 100;
+const GROUP_BATCH = 20;
+let state = { mode: "demo", demo: null, custom: null, filter: "all", search: "",
+  galleryLimit: GALLERY_BATCH, pkLimit: GROUP_BATCH, burstLimit: GROUP_BATCH };
+// P1-7：篓子条目绑定扫描文件夹（source_dir + 文件 id），换文件夹后
+// 不会把旧篓子里的同名文件算成新文件夹的文件。
+let basket = loadBasket();
+let names = JSON.parse(localStorage.getItem(LS_NAMES) || "{}");
+let scanBusy = false;
+
+function loadBasket(){
+  const out = [];
+  const seen = new Set();
+  function push(id, dir, legacy){
+    if(typeof id !== "string" || !id) return;
+    const key = (dir || "") + "\u0000" + id;
+    if(seen.has(key)) return;
+    seen.add(key);
+    out.push({ id: id, source_dir: dir || "", legacy: !!legacy || !dir });
+  }
+  try{
+    const raw = localStorage.getItem(LS_BASKET);
+    if(raw){
+      const arr = JSON.parse(raw);
+      if(Array.isArray(arr)) for(const e of arr){
+        if(typeof e === "string") push(e, "", true);
+        else if(e && typeof e.id === "string") push(e.id, e.source_dir || "", !!e.legacy);
+      }
+    }
+  }catch(e){}
+  try{
+    // 旧版 v1 只存文件名，没有文件夹信息：保留显示但标记为未绑定，
+    // 绝不悄悄当成当前文件夹里的同名文件。
+    const raw = localStorage.getItem(LS_BASKET_V1);
+    if(raw){
+      const arr = JSON.parse(raw);
+      if(Array.isArray(arr)) for(const e of arr){
+        if(typeof e === "string") push(e, "", true);
+        else if(e && typeof e.id === "string") push(e.id, e.source_dir || "", true);
+      }
+    }
+  }catch(e){}
+  return out;
+}
+function resetPaging(){
+  state.galleryLimit = GALLERY_BATCH;
+  state.pkLimit = GROUP_BATCH;
+  state.burstLimit = GROUP_BATCH;
+}
+function saveLocal(){
+  // 防爆：localStorage 只存轻量状态——待删篓存 {id, source_dir}，
+  // 改名存 ID→名字映射。绝不把 Base64 缩略图字符串存进来（浏览器
+  // 5MB 上限会报错）。防御性过滤：名字里若混入 data: URI 直接丢弃。
+  for(const k of Object.keys(names)){
+    if(typeof names[k] === "string" && names[k].indexOf("data:") === 0) delete names[k];
+  }
+  localStorage.setItem(LS_BASKET, JSON.stringify(basket.map(e => (
+    { id: e.id, source_dir: e.source_dir || "", legacy: !!e.legacy }))));
+  localStorage.removeItem(LS_BASKET_V1);  // 迁移完成，不再重复导入旧格式
+  localStorage.setItem(LS_NAMES, JSON.stringify(names));
+}
+function folderName(p){
+  if(!p) return "（未知文件夹）";
+  const s = String(p).replace(/[\\/]+$/, "");
+  const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
+  return i >= 0 ? s.slice(i + 1) : s;
+}
+function currentSourceDir(){ const d = cur(); return d ? (d.source_dir || "") : ""; }
+// Windows 盘符路径忽略大小写；Linux/macOS 保持精确比较。
+function sameDir(a, b){
+  if(!a || !b) return false;
+  if(a === b) return true;
+  const win = /^[A-Za-z]:[\\/]/;
+  return win.test(a) && win.test(b) && a.toLowerCase() === b.toLowerCase();
+}
+function basketHas(id, src){
+  const dir = src === undefined ? currentSourceDir() : src;
+  return basket.some(e => e.id === id && sameDir(e.source_dir, dir));
+}
+function basketKeyOf(e){
+  return encodeURIComponent(JSON.stringify([e.source_dir || "", e.id]));
+}
+function addBasket(id){
+  const dir = currentSourceDir();
+  if(!dir) return;
+  if(basket.some(e => e.id === id && sameDir(e.source_dir, dir))) return;
+  basket.push({ id: id, source_dir: dir, legacy: false });
+}
+function thumbUrl(im){
+  // v3.2.0：图片改走服务端动态缩略图接口 + loading=lazy，DOM 里不再
+  // 塞 Base64 字符串；屏外图片滚动到附近时才请求。没有相对路径时
+  // （极少数异常数据）回退到扫描结果里内嵌的 Base64 缩略图。
+  if(im && im.relative_path) return "/api/thumb?rel=" + encodeURIComponent(im.relative_path);
+  return im ? im.thumbnail : "";
+}
+function toast(msg){
+  const box = document.getElementById("toasts");
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = msg;
+  box.appendChild(el);
+  setTimeout(()=> el.remove(), 4200);
+}
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function fmtBytes(n){
+  if(n==null) return "";
+  if(n < 1024) return n + " B";
+  if(n < 1024*1024) return (n/1024).toFixed(1) + " KB";
+  return (n/1024/1024).toFixed(2) + " MB";
+}
+function fmtDate(iso){
+  if(!iso) return "无拍摄时间";
+  return iso.replace("T", " ").slice(0, 16);
+}
+function cur(){ return state.mode === "demo" ? state.demo : state.custom; }
+function byId(id){ const d = cur(); if(!d) return null; return d.images.find(x => x.id === id); }
+function faceLabelOf(imageId){
+  const d = cur(); if(!d) return null;
+  for(const g of (d.face_groups || [])){
+    if(g.members.includes(imageId)) return names[g.id] || g.label;
+  }
+  return null;
+}
+function tagLabel(tag){
+  return { dated:"带拍摄时间", burst:"连拍保护组", screenshot:"手机截图", no_exif:"无拍摄时间" }[tag] || tag;
+}
+function tagClass(tag){
+  return { burst:"tag burst", screenshot:"tag shot", no_exif:"tag noexif" }[tag] || "tag";
+}
+async function api(path, body){
+  const opt = { headers: { "Content-Type": "application/json" } };
+  if(body !== undefined){ opt.method = "POST"; opt.body = JSON.stringify(body); }
+  const r = await fetch(path, opt);
+  const j = await r.json();
+  if(!r.ok) throw new Error(j.error || ("请求失败：" + r.status));
+  return j;
+}
+// P1-1：扫描/演示/选文件夹期间统一禁用按钮并显示加载态；服务端还有
+// 扫描锁兜底，正在扫描时再来请求会返回 409（busy）。
+function setScanBusy(on, label){
+  scanBusy = !!on;
+  for(const id of ["btn-scan", "btn-demo", "btn-pick"]){
+    const b = document.getElementById(id);
+    if(!b) continue;
+    b.disabled = !!on;
+    if(id === "btn-scan"){
+      if(on){
+        if(!b.dataset.idleLabel) b.dataset.idleLabel = b.textContent;
+        b.textContent = label || "扫描中…";
+        b.classList.add("loading");
+        b.setAttribute("aria-busy", "true");
+      } else {
+        if(b.dataset.idleLabel) b.textContent = b.dataset.idleLabel;
+        b.classList.remove("loading");
+        b.removeAttribute("aria-busy");
+      }
+    }
+  }
+  const tab = document.getElementById("tab-demo");
+  if(tab) tab.disabled = !!on;
+  document.body.classList.toggle("scanning", !!on);
+}
+async function runScan(payload, label){
+  if(scanBusy){ toast("正在扫描中，请等当前扫描完成"); return null; }
+  setScanBusy(true, label);
+  try{ return await api("/api/scan", payload); }
+  catch(e){
+    toast((payload && payload.demo ? "加载演示失败：" : "扫描失败：") + e.message);
+    return null;
+  }
+  finally{ setScanBusy(false); }
+}
+
+function renderFaceBanner(){
+  const d = cur(); const el = document.getElementById("face-banner");
+  if(!d){ el.innerHTML = ""; return; }
+  const method = d.face_method;
+  if(method === "embedding_dbscan"){
+    el.innerHTML = '<section class="card"><p style="margin:0;">人脸：真实人脸特征向量聚类（特征向量 + DBSCAN），非 Haar 检测冒充。</p></section>';
+  } else if(method === "test_grouping"){
+    el.innerHTML = '<section class="card"><p style="margin:0;">人脸：当前为测试分组（非真实人脸识别），真实人脸聚类待真机环境验证。Haar 只能检测不能认人，未用于身份分组。</p></section>';
+  } else {
+    el.innerHTML = '<section class="card"><p style="margin:0;">人脸：当前无分组。特征向量聚类不可用，且无测试分组。Haar 只能检测不能认人，未用于身份分组。</p></section>';
+  }
+}
+function renderStats(){
+  const d = cur(); const el = document.getElementById("stats");
+  if(!d){ el.innerHTML = ""; return; }
+  const s = d.stats;
+  const cards = [
+    ["照片总数", s.total],
+    ["精确重复组", s.exact_groups + " 组 · 多 " + s.exact_extra_copies + " 张"],
+    ["疑似重复组", s.similar_groups + " 组"],
+    ["连拍保护组", s.burst_groups + " 组"],
+    ["手机截图", s.screenshots + " 张"],
+    ["无拍摄时间", s.no_exif + " 张"],
+    ["带拍摄时间", s.dated + " 张"],
+    ["待删可释放", fmtBytes(s.reclaimable_bytes)],
+  ];
+  el.innerHTML = cards.map(c =>
+    '<div class="stat"><div class="num">' + esc(c[1]) + '</div><div class="lbl">' + esc(c[0]) + '</div></div>'
+  ).join("");
+}
+function galleryItems(){
+  const d = cur(); if(!d) return [];
+  let list = d.images.filter(x => !x.error);
+  if(state.filter === "dated") list = list.filter(x => x.has_exif);
+  else if(state.filter === "burst") list = list.filter(x => x.source_tag === "burst");
+  else if(state.filter === "screenshot") list = list.filter(x => x.source_tag === "screenshot");
+  else if(state.filter === "no_exif") list = list.filter(x => !x.has_exif);
+  const q = state.search.trim().toLowerCase();
+  if(q){
+    list = list.filter(x => {
+      const hay = (x.filename + " " + (x.exif_time || "") + " " + (faceLabelOf(x.id) || "") + " " + tagLabel(x.source_tag)).toLowerCase();
+      return hay.includes(q);
+    });
+  }
+  return list;
+}
+function renderGallery(){
+  const el = document.getElementById("gallery");
+  const d = cur();
+  if(!d){ el.innerHTML = '<div class="empty">还没有数据：点“加载演示图”，或输入文件夹路径后点“扫描这个文件夹”。</div>'; return; }
+  const list = galleryItems();
+  if(!list.length){ el.innerHTML = '<div class="empty">这个筛选下没有照片。试试换个胶囊或清空搜索。</div>'; return; }
+  // v3.2.0 分批渲染：只渲染前 galleryLimit 张，点“加载更多”再往后翻，
+  // 几千张也不会一次建几千个 DOM 节点。图片走动态缩略图接口 + lazy。
+  const visible = list.slice(0, state.galleryLimit);
+  const groups = {};
+  for(const im of visible){
+    const key = im.exif_time ? im.exif_time.slice(0, 10) : "无拍摄时间";
+    (groups[key] = groups[key] || []).push(im);
+  }
+  const keys = Object.keys(groups).sort((a, b) => (a === "无拍摄时间" ? 1 : b === "无拍摄时间" ? -1 : b.localeCompare(a)));
+  let html = keys.map(k => {
+    const cards = groups[k].map(im => {
+      const face = faceLabelOf(im.id);
+      return '<div class="photo" data-open="' + esc(im.id) + '">' +
+        '<img src="' + thumbUrl(im) + '" alt="' + esc(im.filename) + '" loading="lazy">' +
+        '<div class="meta"><div class="name">' + esc(im.filename) + '</div>' +
+        '<div class="small">' + fmtDate(im.exif_time) + ' · ' + im.width + '×' + im.height + ' · ' + fmtBytes(im.size_bytes) + '</div>' +
+        '<div style="margin-top:6px;"><span class="' + tagClass(im.source_tag) + '">' + tagLabel(im.source_tag) + '</span>' +
+        (face ? '<span class="tag">' + esc(face) + '</span>' : '') + '</div></div></div>';
+    }).join("");
+    return '<div class="timeline"><h3>' + esc(k) + '（' + groups[k].length + ' 张）</h3><div class="grid">' + cards + '</div></div>';
+  }).join("");
+  if(list.length > state.galleryLimit){
+    html += '<div style="text-align:center;margin-top:16px;"><button class="primary" data-loadmore-gallery>加载更多（还剩 ' + (list.length - state.galleryLimit) + ' 张）</button></div>';
+  }
+  el.innerHTML = html;
+  el.querySelectorAll("[data-loadmore-gallery]").forEach(b => b.addEventListener("click", () => { state.galleryLimit += GALLERY_BATCH; renderGallery(); }));
+  el.querySelectorAll("[data-open]").forEach(n => n.addEventListener("click", () => openModal(n.dataset.open)));
+}
+function pairNoteFor(keepId, discId){
+  const d = cur(); if(!d) return null;
+  for(const g of (d.similar_groups || [])){
+    for(const p of (g.pairs || [])){
+      if((p.a === keepId && p.b === discId) || (p.a === discId && p.b === keepId)) return p;
+    }
+  }
+  return null;
+}
+function photoMini(im){
+  if(!im) return '<div class="empty">缺失</div>';
+  return '<img src="' + thumbUrl(im) + '" alt="' + esc(im.filename) + '" loading="lazy" style="width:100%;height:170px;object-fit:cover;border-radius:8px;background:#FAFAFA;">' +
+    '<div style="font-weight:600;margin-top:8px;word-break:break-all;">' + esc(im.filename) + '</div>' +
+    '<div style="color:#737373;font-size:12px;margin-top:4px;">' + fmtDate(im.exif_time) + ' · ' + im.width + '×' + im.height + ' · ' + fmtBytes(im.size_bytes) + '</div>';
+}
+function renderPK(){
+  const d = cur(); const el = document.getElementById("pk");
+  const burstsEl = document.getElementById("bursts");
+  if(!d){ el.innerHTML = '<div class="empty">还没有数据。</div>'; burstsEl.innerHTML = ""; return; }
+  // v3.2.0 分批渲染：PK 组与连拍组每批只渲染 GROUP_BATCH 组，点
+  // “加载更多”再往后翻；图片走动态缩略图接口 + lazy。
+  const recsAll = (d.recommendations || []).filter(r => r.discard && r.discard.length);
+  const recs = recsAll.slice(0, state.pkLimit);
+  if(!recsAll.length){ el.innerHTML = '<div class="empty">没有发现重复，干净！</div>'; }
+  else {
+    let pkHtml = recs.map((r, ri) => {
+      const keep = byId(r.keep);
+      const discs = r.discard.map(dd => {
+        const id = typeof dd === "string" ? dd : dd.id;
+        const sim = typeof dd === "string" ? null : dd.similarity_to_keep;
+        const p = pairNoteFor(r.keep, id);
+        const inBasket = basketHas(id);
+        return '<div class="discard">' + photoMini(byId(id)) +
+          '<div style="margin-top:8px;font-size:13px;color:#737373;">' +
+          (sim != null ? '与保留项相似度 ' + sim + '% · ' : 'SHA-256 完全相同 · ') +
+          (p && p.color_variant ? '<span class="color-badge">色彩变体（黑白/滤镜）</span>' : '') + '</div>' +
+          '<button class="small" style="margin-top:8px;" data-basket="' + esc(id) + '"' + (inBasket ? ' disabled' : '') + '>' +
+          (inBasket ? '已在待删篓' : '移入待删篓') + '</button></div>';
+      }).join("");
+      return '<div class="pk"><div class="pk-head"><strong>' +
+        (r.group_type === "exact" ? "精确重复" : "疑似重复") + '</strong>' +
+        '<span style="color:#737373;font-size:13px;">' + esc(r.reason) + '</span></div>' +
+        '<div class="vs"><div><span class="keep-badge">推荐保留</span>' + photoMini(keep) + '</div>' +
+        '<div class="vs-mid">VS</div><div>' + discs + '</div></div></div>';
+    }).join("");
+    if(recsAll.length > state.pkLimit){
+      pkHtml += '<div style="text-align:center;margin-top:16px;"><button class="primary" data-loadmore-pk>加载更多（还剩 ' + (recsAll.length - state.pkLimit) + ' 组）</button></div>';
+    }
+    el.innerHTML = pkHtml;
+    el.querySelectorAll("[data-basket]").forEach(b => b.addEventListener("click", () => {
+      addBasket(b.dataset.basket); saveLocal(); toast("已移入待删篓（还没删）"); renderAll();
+    }));
+    el.querySelectorAll("[data-loadmore-pk]").forEach(b => b.addEventListener("click", () => { state.pkLimit += GROUP_BATCH; renderPK(); }));
+  }
+  const burstsAll = d.burst_groups || [];
+  const bursts = burstsAll.slice(0, state.burstLimit);
+  if(!burstsAll.length){ burstsEl.innerHTML = '<div class="empty">没有连拍组。</div>'; }
+  else {
+    let bHtml = bursts.map(g => {
+      const cards = g.map(id => '<div class="photo">' + photoMini(byId(id)) + '</div>').join("");
+      return '<div style="margin-bottom:16px;"><strong>连拍组（' + g.length + ' 张 · 已保护）</strong><div class="grid" style="margin-top:10px;">' + cards + '</div></div>';
+    }).join("");
+    if(burstsAll.length > state.burstLimit){
+      bHtml += '<div style="text-align:center;margin-top:16px;"><button class="primary" data-loadmore-burst>加载更多（还剩 ' + (burstsAll.length - state.burstLimit) + ' 组）</button></div>';
+    }
+    burstsEl.innerHTML = bHtml;
+    burstsEl.querySelectorAll("[data-loadmore-burst]").forEach(b => b.addEventListener("click", () => { state.burstLimit += GROUP_BATCH; renderPK(); }));
+  }
+}
+function renderFaces(){
+  const d = cur(); const el = document.getElementById("faces");
+  if(!d){ el.innerHTML = ""; return; }
+  const groups = d.face_groups || [];
+  if(!groups.length){ el.innerHTML = '<div class="empty">当前没有人物分组（原因见顶部横幅）。</div>'; return; }
+  el.innerHTML = groups.map(g => {
+    const first = byId(g.members[0]);
+    const thumbs = g.members.slice(0, 4).map(id => {
+      const im = byId(id);
+      return im ? '<img src="' + thumbUrl(im) + '" alt="" loading="lazy" style="width:52px;height:52px;object-fit:cover;border-radius:12px;">' : '';
+    }).join("");
+    return '<div class="face"><img class="avatar" src="' + (first ? thumbUrl(first) : "") + '" alt="">' +
+      '<div style="flex:1;"><div><strong>' + esc(names[g.id] || g.label) + '</strong>' +
+      ' <span style="color:#737373;font-size:12px;">' + (g.method === "test_grouping" ? "测试分组（非真实人脸识别）" : "特征向量聚类") + '</span></div>' +
+      '<div style="color:#737373;font-size:13px;margin:4px 0;">' + g.members.length + ' 张：' + esc(g.members.join("、")) + '</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;">' + thumbs + '</div></div>' +
+      '<div><input type="text" value="' + esc(names[g.id] || g.label) + '" data-rename="' + esc(g.id) + '" placeholder="输入名字，如：妈妈">' +
+      '<button class="small" data-rename-btn="' + esc(g.id) + '">保存名字</button></div></div>';
+  }).join("");
+  el.querySelectorAll("[data-rename-btn]").forEach(b => b.addEventListener("click", () => {
+    const gid = b.dataset.renameBtn;
+    const input = el.querySelector('[data-rename="' + gid + '"]');
+    const v = (input.value || "").trim();
+    if(v){ names[gid] = v; } else { delete names[gid]; }
+    saveLocal(); toast("名字已保存在本机浏览器里"); renderAll();
+  }));
+}
+function renderBasket(){
+  const el = document.getElementById("basket");
+  const box = document.getElementById("confirm-box");
+  box.style.display = "none"; box.innerHTML = "";
+  if(!basket.length){ el.innerHTML = '<div class="empty">篓子是空的。去 PK 台把淘汰候选移进来。</div>'; return; }
+  const d = cur();
+  const curDir = currentSourceDir();
+  // 只有“属于当前扫描文件夹、且是 3.2.0 之后的新格式”的条目才允许删。
+  const deletable = basket.filter(e => !e.legacy && sameDir(e.source_dir, curDir));
+  let html = "";
+  for(const e of basket){
+    const same = !e.legacy && sameDir(e.source_dir, curDir);
+    const im = (d && same) ? byId(e.id) : null;
+    let note, cls = "basket-item";
+    if(e.legacy){
+      cls += " stale";
+      note = '<div class="basket-note">旧版篓子条目（未绑定文件夹）：已保留，但不会自动删除；请从 PK 台重新加入。</div>';
+    } else if(!same){
+      cls += " stale";
+      note = '<div class="basket-note">属于其他文件夹「' + esc(folderName(e.source_dir)) + '」：换文件夹后不会误删当前文件夹里的同名文件。</div>';
+    } else if(!im){
+      note = '<div class="basket-note">当前扫描里找不到这张图，删除时会再校验一次。</div>';
+    } else {
+      note = '<div class="basket-note">' + fmtDate(im.exif_time) + ' · ' + fmtBytes(im.size_bytes) + '</div>';
+    }
+    const key = basketKeyOf(e);
+    html += '<div class="' + cls + '">' +
+      (im ? '<img src="' + thumbUrl(im) + '" alt="" loading="lazy">' : '<div style="width:64px;height:64px;"></div>') +
+      '<div style="flex:1;"><strong>' + esc(e.id) + '</strong>' +
+      (same ? '' : '<div style="color:#737373;font-size:12px;">' + esc(folderName(e.source_dir || "")) + '</div>') +
+      note + '</div>' +
+      '<button class="small" data-unbasket-key="' + esc(key) + '">移出篓子</button></div>';
+  }
+  if(deletable.length){
+    html += '<div style="margin-top:12px;"><button class="danger" id="btn-delete-step1">二次确认删除（' + deletable.length + ' 个）</button></div>';
+  } else {
+    html += '<div style="margin-top:12px;"><button class="danger" id="btn-delete-step1" disabled>二次确认删除（0 个）</button>' +
+      '<div class="basket-note">当前文件夹没有可删除的篓子条目。旧版条目或不属于当前文件夹的条目不会被删。</div></div>';
+  }
+  el.innerHTML = html;
+  el.querySelectorAll("[data-unbasket-key]").forEach(b => b.addEventListener("click", () => {
+    const key = b.dataset.unbasketKey;
+    basket = basket.filter(e => basketKeyOf(e) !== key);
+    saveLocal(); renderAll();
+  }));
+  const step1 = document.getElementById("btn-delete-step1");
+  if(step1) step1.addEventListener("click", () => {
+    const items = basket.filter(e => !e.legacy && sameDir(e.source_dir, curDir))
+      .map(e => ({ id: e.id, source_dir: e.source_dir }));
+    if(!items.length) return;
+    const modeNote = state.mode === "demo" ? "当前是演示数据，删后可用工具包里的生成器重新生成演示图。" : "";
+    box.style.display = "block";
+    box.innerHTML = '<h3 style="margin:0 0 8px;">第二次确认：真的要删除这 ' + items.length + ' 个文件吗？</h3>' +
+      '<p style="margin:0 0 12px;color:#737373;font-size:14px;">文件将被移入系统回收站（若系统不支持，则移入工具包内的 .trash_backup 隔离文件夹），不会直接彻底删除；之后你仍可在回收站或隔离文件夹里找回或手动清空。' + modeNote + '</p>' +
+      '<button class="danger" id="btn-delete-confirm">我确认删除</button> <button id="btn-delete-cancel">取消</button>' +
+      '<div id="delete-result" style="margin-top:12px;font-size:14px;"></div>';
+    document.getElementById("btn-delete-cancel").addEventListener("click", () => { box.style.display = "none"; });
+    document.getElementById("btn-delete-confirm").addEventListener("click", async () => {
+      const resEl = document.getElementById("delete-result");
+      resEl.textContent = "正在移入回收站 / 隔离区……";
+      try{
+        const res = await api("/api/delete", { items: items, confirmed: true });
+        const lines = res.results.map(r => r.ok ? '成功 ' + r.id + ' → ' + r.destination + '（' + r.method + '）' : '失败 ' + r.id + '：' + r.error);
+        resEl.innerHTML = lines.map(esc).join("<br>");
+        for(const r of res.results){
+          if(!r.ok) continue;
+          basket = basket.filter(e => !(e.id === r.id && sameDir(e.source_dir, r.source_dir || "")));
+        }
+        saveLocal();
+        toast("删除完成：文件已进回收站或隔离区，可找回");
+        setTimeout(renderAll, 600);
+      }catch(e){ resEl.textContent = "删除失败：" + e.message; }
+    });
+  });
+}
+function renderRules(){
+  const d = cur();
+  const el = document.getElementById("rules");
+  if(!d){ el.textContent = ""; return; }
+  el.textContent =
+    "数据源：" + (d.source_dir || "") + " · 生成于 " + (d.generated_at || "") + "\n" +
+    "连拍规则：" + (d.burst_rule || "") + "\n" +
+    "推荐规则：" + (d.recommendation_rule || "") + "\n" +
+    "疑似重复范围：" + (d.similar_scope_note || "") + "\n" +
+    "人脸：" + (d.face_note || "") + "\n" +
+    "缩略图：" + (d.thumbnail_note || "");
+}
+function renderAll(){
+  renderFaceBanner(); renderStats(); renderGallery(); renderPK(); renderFaces(); renderBasket(); renderRules();
+  document.getElementById("tab-demo").classList.toggle("active", state.mode === "demo");
+  document.getElementById("tab-custom").classList.toggle("active", state.mode === "custom");
+  document.querySelectorAll("#pills .pill").forEach(p => p.classList.toggle("active", p.dataset.filter === state.filter));
+}
+function openModal(id){
+  const im = byId(id); if(!im) return;
+  const root = document.getElementById("modal-root");
+  root.innerHTML = '<div class="modal-bg" id="modal-bg"><div class="modal">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;"><strong>' + esc(im.filename) + '</strong>' +
+    '<button id="modal-close">关闭</button></div>' +
+    '<img src="/api/file?rel=' + encodeURIComponent(im.relative_path) + '" alt="' + esc(im.filename) + '" style="margin-top:12px;">' +
+    '<p style="color:#737373;font-size:13px;">拍摄时间：' + fmtDate(im.exif_time) + ' · ' + im.width + '×' + im.height + ' · ' + fmtBytes(im.size_bytes) +
+    ' · SHA-256：' + esc(im.sha256.slice(0, 16)) + '… · dHash：' + esc(im.dhash) +
+    (im.rgb_mean ? ' · RGB 均值：' + im.rgb_mean.join(", ") : '') + '</p></div></div>';
+  document.getElementById("modal-close").addEventListener("click", () => root.innerHTML = "");
+  document.getElementById("modal-bg").addEventListener("click", e => { if(e.target.id === "modal-bg") root.innerHTML = ""; });
+}
+document.getElementById("pills").addEventListener("click", e => {
+  const b = e.target.closest("[data-filter]"); if(!b) return;
+  state.filter = b.dataset.filter; resetPaging(); renderAll();
+});
+document.getElementById("input-search").addEventListener("input", e => { state.search = e.target.value; resetPaging(); renderGallery(); });
+document.getElementById("tab-demo").addEventListener("click", async () => {
+  if(scanBusy){ toast("正在扫描中，请稍候"); return; }
+  state.mode = "demo";
+  if(!state.demo){
+    const data = await runScan({ demo: true }, "加载演示中…");
+    if(data) state.demo = data;
+  }
+  resetPaging(); renderAll();
+});
+document.getElementById("tab-custom").addEventListener("click", () => { state.mode = "custom"; resetPaging(); renderAll(); });
+document.getElementById("btn-demo").addEventListener("click", async () => {
+  const data = await runScan({ demo: true }, "加载演示中…");
+  if(!data){ return; }
+  state.demo = data; state.mode = "demo";
+  toast("演示数据已加载（25 张合成测试图）"); resetPaging(); renderAll();
+});
+document.getElementById("btn-pick").addEventListener("click", async () => {
+  // P1-1：对话框在服务端子进程里弹，这里只等结果；等待期间按钮禁用，
+  // 无 GUI 环境时接口返回 ok=false，前端平滑降级为手输路径。
+  if(scanBusy){ toast("正在扫描中，请稍候"); return; }
+  const b = document.getElementById("btn-pick");
+  const label = b.textContent;
+  b.disabled = true; b.textContent = "等待选择…";
+  try{
+    const res = await api("/api/pick_folder");
+    if(res.ok && res.path){
+      document.getElementById("input-path").value = res.path;
+      toast("已填入：" + res.path + "，点“扫描这个文件夹”开始");
+    } else if(res.cancelled){
+      toast("已取消选择");
+    } else if(res.timeout){
+      toast("选择文件夹超时，请手动输入路径");
+    } else {
+      toast((res.reason || "当前环境无图形界面") + "，请手动输入文件夹路径");
+    }
+  }catch(e){ toast("选择文件夹失败：" + e.message + "，请手动输入路径"); }
+  finally{ b.disabled = false; b.textContent = label; }
+});
+document.getElementById("btn-scan").addEventListener("click", async () => {
+  const path = document.getElementById("input-path").value.trim();
+  if(!path){ toast("请先输入本地文件夹路径"); return; }
+  const data = await runScan({ path: path }, "扫描中…");
+  if(!data){ return; }
+  state.custom = data;
+  state.mode = "custom"; toast("扫描完成：共 " + state.custom.stats.total + " 张"); resetPaging(); renderAll();
+});
+document.getElementById("btn-export").addEventListener("click", () => {
+  const d = cur(); if(!d){ toast("还没有数据可导出"); return; }
+  // P1-8：不导出本机完整绝对路径；照片路径都是相对扫描文件夹的相对路径。
+  const payload = {
+    exported_at: new Date().toISOString(),
+    tool_version: "3.2.0",
+    source_dir_name: folderName(d.source_dir || ""),
+    source_dir_note: "已脱敏：仅保留文件夹名称与相对路径，不含本机完整路径",
+    stats: d.stats,
+    recommendations: d.recommendations,
+    basket: basket.filter(e => !e.legacy && sameDir(e.source_dir, d.source_dir || ""))
+      .map(e => ({ id: e.id })),
+    face_groups: (d.face_groups || []).map(g => (
+      { id: g.id, label: g.label, method: g.method, members: g.members })),
+    privacy_note: "导出的照片路径均为相对扫描文件夹的相对路径，不含盘符、用户名或完整本机路径。"
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "照片整理清单.json"; a.click();
+  URL.revokeObjectURL(a.href); toast("清单已导出（相对路径，不含完整本机路径）");
+});
+document.getElementById("btn-reset").addEventListener("click", () => {
+  basket = []; names = {}; state.search = ""; state.filter = "all";
+  document.getElementById("input-search").value = "";
+  localStorage.removeItem(LS_BASKET_V1);
+  resetPaging();
+  saveLocal(); toast("已重置：篓子、改名与筛选已清空（没有删除任何文件）"); renderAll();
+});
+document.getElementById("btn-stop").addEventListener("click", async () => {
+  if(!confirm("确定要停止本地服务吗？停止后窗口会一起关闭，需重新打开 Shiying-3.2.0。")) return;
+  try{ await api("/api/shutdown", {}); }catch(e){}
+  // P0-3：先让窗口自己关（--app 模式下 window.close() 会触发进程退出；
+  // pywebview 由 app_native 主线程销毁）。关不掉时才显示遮罩说明。
+  if(SESSION){ setTimeout(() => { try{ window.close(); }catch(e){} }, 300); }
+  setTimeout(() => {
+    if(document.visibilityState === "hidden") return;
+    document.body.insertAdjacentHTML("beforeend",
+      '<div class="stop-overlay"><div><h2>服务已停止</h2><p style="color:#737373;">本地服务已干净停止，没有后台残留。<br>想再用时，重新打开 Shiying-3.2.0（app_native）即可。</p></div></div>');
+  }, 1200);
+});
+
+// P0-2：窗口心跳。app_native 用“心跳 + pagehide 关闭信号 + 进程退出”
+// 三条线索判断窗口是否还活着；刷新页面时 ping 会把关闭信号撤销。
+const SESSION = (function(){
+  try{ return new URLSearchParams(location.search).get("s") || ""; }catch(e){ return ""; }
+})();
+function pingServer(){
+  if(!SESSION) return;
+  fetch("/api/ping?s=" + encodeURIComponent(SESSION), { cache: "no-store" }).catch(() => {});
+}
+if(SESSION){
+  pingServer();
+  setInterval(pingServer, 5000);
+  document.addEventListener("visibilitychange", () => { if(!document.hidden) pingServer(); });
+  window.addEventListener("focus", pingServer);
+  window.addEventListener("pagehide", () => {
+    try{ navigator.sendBeacon("/api/client_closed?s=" + encodeURIComponent(SESSION)); }catch(e){}
+  });
+}
+(async function init(){
+  try{
+    const h = await api("/api/health");
+    if(h && h.data_dir_fallback){
+      const note = document.getElementById("data-dir-note");
+      if(note){
+        note.innerHTML = '<section class="card"><p style="margin:0;">程序所在文件夹不可写，日志、隔离区与浏览器配置已回退到：<strong>' +
+          esc(h.data_dir) + '</strong></p></section>';
+      }
+    }
+  }catch(e){}
+  let data = null;
+  try{ data = await runScan({ demo: true }, "加载演示中…"); }
+  catch(e){ toast("演示加载失败：" + e.message + "（可手动输入文件夹扫描）"); }
+  if(data) state.demo = data;
+  renderAll();
+  if(basket.some(e => e.legacy)){
+    toast("检测到旧版篓子条目（未绑定文件夹），已保留但不会自动删除；请从 PK 台重新加入。");
+  }
+})();
+</script>
+</body>
+</html>
