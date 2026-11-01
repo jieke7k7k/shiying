@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shiying-3.2.0 原生窗口启动入口：像桌面软件一样打开，不显示地址栏。
+"""Shiying-3.3.0 原生窗口启动入口：像桌面软件一样打开，不显示地址栏。
 
 启动顺序：
   1) 首选 pywebview（Windows 上即系统 WebView2）创建原生窗口；
@@ -7,7 +7,7 @@
      （--app 没有地址栏、没有标签栏，看起来就是独立窗口）；
   3) 两者都不可用时明确提示安装方式并退出，绝不退化成带地址栏的普通浏览器。
 
-3.2.0 生命周期（P0-2 / P0-3）：
+3.3.0 生命周期（沿用 3.2.0 的 P0-2 / P0-3）：
   - 服务跑在本进程的后台线程，只监听 127.0.0.1；
   - --app 回退不再用 proc.wait() 直接判断窗口关闭：
       * 使用可写目录下持久化的浏览器配置目录 browser_profile/，
@@ -209,8 +209,8 @@ import uuid
 from http.server import ThreadingHTTPServer
 
 
-VERSION = "3.2.0"
-WINDOW_TITLE = "拾影 Shiying-3.2.0"
+VERSION = "3.3.0"
+WINDOW_TITLE = "拾影 Shiying-3.3.0"
 _SESSION = uuid.uuid4().hex
 _SERVER_MOD = None
 
@@ -592,7 +592,8 @@ def _self_test(port):
     try:
         status, html = _http_get(url)
         ok_html = (status == 200 and b"<title>" in html
-                   and b'id="gallery"' in html)
+                   and b'id="gallery"' in html
+                   and b'id="semantic-panel"' in html)
 
         status, body = _http_get(url + "api/health")
         health = json.loads(body.decode("utf-8"))
@@ -642,6 +643,69 @@ def _self_test(port):
                     and s.get("burst_groups") == 2
                     and s.get("screenshots") == 2
                     and s.get("no_exif") == 4)
+
+        # ---- 3.3.0 语义搜图自检（模型没下载时跳过，不擅自下载 190MB）----
+        sem_ok = {"status": False, "index": None, "queries": [],
+                  "api_fallback": None, "skipped": ""}
+        try:
+            status, raw = _http_get(url + "api/semantic/status")
+            sem = json.loads(raw.decode("utf-8"))
+            sem_ok["status"] = (status == 200 and sem.get("model", {}).get("dim") == 512
+                                and bool(sem.get("model", {}).get("model_id")))
+            sem_ok["model_label"] = sem.get("model", {}).get("model_label")
+            if not sem.get("model", {}).get("present"):
+                sem_ok["skipped"] = "本机没有语义模型（未下载），跳过索引与搜索自检"
+            else:
+                _http_post_json(url + "api/index/build",
+                                {"source_dir": scan["source_dir"]})
+                deadline = time.monotonic() + 600
+                prog = {}
+                while time.monotonic() < deadline:
+                    _status, rawp = _http_get(url + "api/index_progress")
+                    prog = json.loads(rawp.decode("utf-8"))
+                    if not prog.get("running"):
+                        break
+                    time.sleep(0.5)
+                sem_ok["index"] = prog
+                # P0-2 修复：演示集 25 张里有 3 张 SHA-256 克隆副本，去重后
+                # 唯一向量只有 22 条，旧的 >= 25 在干净环境下永远 False，
+                # 只有残留 82 条时才碰巧 True。改为 >= 22（演示集唯一数）。
+                index_ok = (not prog.get("error")
+                            and (prog.get("index_count") or 0) >= 22)
+                sem_ok["index_ok"] = index_ok
+                for word in ("海滩", "食物", "城市建筑"):
+                    _st, out = _http_post_json(
+                        url + "api/semantic/search",
+                        {"query": word, "band": "standard",
+                         "source_dir": scan["source_dir"]})
+                    sem_ok["queries"].append(
+                        {"word": word, "ok": out.get("ok"),
+                         "count": len(out.get("results", [])),
+                         "top": (out.get("results") or [{}])[0].get("id"),
+                         "score": (out.get("results") or [{}])[0].get("score")})
+                # 无 Key 时勾选 API 精排必须自动退回本地，不能报错
+                _st, out = _http_post_json(
+                    url + "api/semantic/search",
+                    {"query": "海滩", "band": "standard", "use_api": True,
+                     "source_dir": scan["source_dir"]})
+                sem_ok["api_fallback"] = bool(
+                    out.get("ok") and not out.get("api", {}).get("used")
+                    and out.get("results"))
+                sem_ok["api_notice"] = out.get("api", {}).get("notice")
+        except Exception as e:
+            log("自检：语义搜图检查出错：%s" % e)
+            sem_ok["error"] = str(e)
+
+        status, raw_settings = _http_get(url + "api/settings")
+        settings = json.loads(raw_settings.decode("utf-8"))
+        ok_settings = (status == 200 and "has_key" in settings
+                       and "masked_key" in settings
+                       and "api_key" not in settings)
+
+        sem_queries_ok = (all(q["ok"] and q["count"] > 0
+                              for q in sem_ok["queries"])
+                          if sem_ok["queries"] else True)
+
         log("自检：index.html=%s health=%s ping=%s 缩略图=%s"
             % (ok_html, ok_health, ok_ping, ok_thumb))
         log("自检：演示扫描 total=%s errors=%s exact=%s similar=%s burst=%s "
@@ -657,14 +721,35 @@ def _self_test(port):
             % (mismatch_ok, legacy_ok))
         log("自检：数据目录=%s（回退=%s）"
             % (health.get("data_dir"), health.get("data_dir_fallback")))
+        log("自检：语义接口=%s 设置掩码接口=%s 模型=%s"
+            % (sem_ok["status"], ok_settings,
+               sem_ok.get("model_label") or "见 /api/semantic/status"))
+        if sem_ok.get("skipped"):
+            log("自检：%s" % sem_ok["skipped"])
+        else:
+            idx = sem_ok.get("index") or {}
+            log("自检：语义索引 %s/%s，共 %s 条向量，错误=%s"
+                % (idx.get("done"), idx.get("total"), idx.get("index_count"),
+                   idx.get("error") or "无"))
+            for q in sem_ok["queries"]:
+                log("自检：语义搜索「%s」返回 %s 张，Top1=%s（%s 分）"
+                    % (q["word"], q["count"], q["top"], q["score"]))
+            if sem_ok["api_fallback"] is not None:
+                log("自检：无 Key 勾选 API 精排自动退回本地=%s（%s）"
+                    % (sem_ok["api_fallback"], sem_ok.get("api_notice")))
 
+        # P0-2 修复：旧 passed 没检查 index_ok 与 api_fallback，门禁形同虚设。
         passed = (ok_html and ok_health and ok_ping and ok_thumb
                   and not missing and delete_status == 400
-                  and mismatch_ok and legacy_ok and baseline)
+                  and mismatch_ok and legacy_ok and baseline
+                  and sem_ok["status"] and ok_settings and sem_queries_ok
+                  and sem_ok.get("index_ok") and sem_ok.get("api_fallback"))
         if missing:
             log("自检：缺少字段 %s" % missing)
         if not baseline:
             log("自检：演示数字偏离基线（25/0/2/3/2/2/4）")
+        if not sem_queries_ok:
+            log("自检：语义搜索有词返回 0 张，需检查索引")
         log("自检%s" % ("通过" if passed else "失败"))
         return 0 if passed else 1
     except Exception as e:
@@ -694,7 +779,7 @@ def _instance_message(lock_path):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="Shiying-3.2.0 原生窗口入口（照片整理与去重）")
+        description="Shiying-3.3.0 原生窗口入口（照片整理与去重）")
     ap.add_argument("--port", type=int, default=0,
                     help="指定端口（默认自动在 8765~8774 间选空闲端口）")
     ap.add_argument("--no-window", action="store_true",

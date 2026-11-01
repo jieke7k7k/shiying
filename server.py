@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Shiying-3.2.0 本地服务：把扫描与界面串起来，纯本地运行。
+"""Shiying-3.3.0 本地服务：把扫描与界面串起来，本地优先。
 
   - 只监听 127.0.0.1（本机回环），不对局域网/外网开放。
-  - 页面、样式、脚本全部内联在 index.html 里，零外部请求
-    （不加载任何 CDN、字体、统计脚本）。
+  - 页面、样式、脚本全部内联在 index.html 里，不加载任何 CDN、字体、
+    统计脚本；搜索与索引默认完全离线。联网只有两种、都由用户主动触发：
+    首次建立语义索引时的模型下载，以及勾选“本次启用 API 精排”时的厂商请求。唯一的联网动作是用户主动点
+    “建立语义索引”时的模型下载，以及用户本次勾选 API 精排时的厂商请求。
   - 接口：
       GET  /                 -> index.html
       GET  /api/health       -> {"ok", "version", "data_dir", "data_dir_fallback"}
@@ -20,6 +22,18 @@
                                  见 trash_util.py；绝不直接删除）
       POST /api/client_closed -> 窗口关闭信号（pagehide 时 sendBeacon）
       POST /api/shutdown     -> 干净停止服务（页面上的“停止服务”按钮用）
+
+  3.3.0 语义搜图接口（见 semantic_search.py / api_rerank.py）：
+      GET  /api/semantic/status?source_dir=xx
+      POST /api/index/build     {"source_dir": "...", "resume": true}
+      GET  /api/index_progress
+      POST /api/index/pause
+      POST /api/index/cancel
+      POST /api/semantic/search {"query", "band", "use_api", "source_dir"}
+      GET  /api/settings        -> 厂商/模型/掩码 Key（绝不返回明文 Key）
+      POST /api/settings        -> {"provider","base_url","model","api_key",
+                                    "clear_key","privacy_ack"}
+      POST /api/semantic/privacy_ack
   - 关闭协议（P0-3）：/api/shutdown 先回包，再置 SHUTDOWN_EVENT；
     app_native 的主线程监听该事件，销毁 pywebview 窗口或结束它启动的
     浏览器进程，然后停服务。不再靠“服务线程停了但窗口还挂着”。
@@ -42,7 +56,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "3.2.0"
+VERSION = "3.3.0"
 
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 if TOOL_DIR not in sys.path:
@@ -304,6 +318,28 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/pick_folder":
             self.send_json(pick_folder())
             return
+        if path == "/api/semantic/status":
+            self._handle_semantic_status(parsed)
+            return
+        if path == "/api/index_progress":
+            try:
+                import semantic_search
+                body = semantic_search.progress()
+                with STATE_LOCK:
+                    result = STATE["result"]
+                body["coverage"] = (semantic_search.scan_coverage(result)
+                                    if result else {"total": 0, "indexed": 0})
+                self.send_json(body)
+            except Exception as e:
+                self.send_json({"error": "读取索引进度失败：%s" % e}, 500)
+            return
+        if path == "/api/settings":
+            try:
+                import api_rerank
+                self.send_json(api_rerank.public_settings())
+            except Exception as e:
+                self.send_json({"error": "读取设置失败：%s" % e}, 500)
+            return
         if path == "/api/file":
             qs = parse_qs(parsed.query)
             rel = (qs.get("rel") or [None])[0]
@@ -415,6 +451,24 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/delete":
             self._handle_delete()
             return
+        if path in ("/api/index/build", "/api/index/pause", "/api/index/cancel"):
+            self._handle_index(path)
+            return
+        if path == "/api/semantic/search":
+            self._handle_semantic_search()
+            return
+        if path == "/api/settings":
+            self._handle_settings()
+            return
+        if path == "/api/semantic/privacy_ack":
+            try:
+                import api_rerank
+                self.read_json()
+                self.send_json(api_rerank.update_settings(
+                    {"privacy_ack": True}))
+            except Exception as e:
+                self.send_json({"error": "记录隐私确认失败：%s" % e}, 500)
+            return
         if path == "/api/client_closed":
             note_client_closed(self._query_token(parsed))
             self.send_json({"ok": True})
@@ -425,6 +479,156 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
         self.send_json({"error": "未知接口"}, 404)
+
+    # ---- 3.3.0 语义搜图 ----
+    def _scan_matches(self, source_dir):
+        with STATE_LOCK:
+            root, result = STATE["root"], STATE["result"]
+        if not root or not result:
+            return None, None, "请先扫描一个文件夹"
+        if source_dir and _norm_scope(source_dir) != _norm_scope(root):
+            return None, None, "当前扫描的是另一个文件夹，请先重新扫描再试"
+        return root, result, None
+
+    def _handle_semantic_status(self, parsed):
+        try:
+            import semantic_search
+        except Exception as e:
+            self.send_json({"error": "语义搜图模块不可用：%s" % e}, 500)
+            return
+        qs = parse_qs(parsed.query)
+        source_dir = (qs.get("source_dir") or [""])[0]
+        try:
+            body = {
+                "ok": True,
+                "model": semantic_search.model_status(),
+                "index": semantic_search.index_info(),
+                "progress": semantic_search.progress(),
+                "bands": semantic_search.BANDS,
+                "band_labels": semantic_search.BAND_LABELS,
+                "calibration": {
+                    "cos_floor": semantic_search.CALIB_FLOOR,
+                    "cos_ceil": semantic_search.CALIB_CEIL,
+                    "note": "线性映射 (cos-%.2f)/(%.2f-%.2f)，三档阈值 "
+                            "宽松/标准/严格 = %s；依据 25 张演示合成图的实测"
+                            "分布校准，真实照片需真机复测。"
+                            % (semantic_search.CALIB_FLOOR,
+                               semantic_search.CALIB_CEIL,
+                               semantic_search.CALIB_FLOOR,
+                               [semantic_search.BANDS[k] for k in
+                                ("loose", "standard", "strict")]),
+                },
+            }
+            with STATE_LOCK:
+                result = STATE["result"]
+                root = STATE["root"]
+            if result and (not source_dir
+                           or _norm_scope(source_dir) == _norm_scope(root)):
+                body["coverage"] = semantic_search.scan_coverage(result)
+            else:
+                body["coverage"] = {"total": 0, "indexed": 0}
+                body["scan_mismatch"] = bool(result and source_dir)
+            self.send_json(body)
+        except Exception as e:
+            self.send_json({"error": "读取语义索引状态失败：%s" % e}, 500)
+
+    def _handle_index(self, path):
+        try:
+            import semantic_search
+        except Exception as e:
+            self.send_json({"error": "语义搜图模块不可用：%s" % e}, 500)
+            return
+        if path == "/api/index/pause":
+            self.send_json(semantic_search.pause_index())
+            return
+        if path == "/api/index/cancel":
+            self.send_json(semantic_search.cancel_index())
+            return
+        body = self.read_json()
+        if body is None:
+            self.send_json({"error": "请求体不是合法 JSON"}, 400)
+            return
+        root, result, err = self._scan_matches(body.get("source_dir"))
+        if err:
+            self.send_json({"error": err}, 409)
+            return
+        try:
+            state = semantic_search.start_index(result, root)
+            state["coverage"] = semantic_search.scan_coverage(result)
+            self.send_json(state)
+        except Exception as e:
+            self.send_json({"error": "启动索引失败：%s" % e}, 500)
+
+    def _handle_semantic_search(self):
+        body = self.read_json()
+        if body is None:
+            self.send_json({"error": "请求体不是合法 JSON"}, 400)
+            return
+        query = str(body.get("query") or "").strip()
+        if not query:
+            self.send_json({"error": "搜索词为空"}, 400)
+            return
+        if len(query) > 80:
+            self.send_json({"error": "搜索词太长（最多 80 字）"}, 400)
+            return
+        band = body.get("band") or "standard"
+        try:
+            import semantic_search
+        except Exception as e:
+            self.send_json({"error": "语义搜图模块不可用：%s" % e}, 500)
+            return
+        if band not in semantic_search.BANDS:
+            self.send_json({"error": "未知的置信度档位：%s" % band}, 400)
+            return
+        root, result, err = self._scan_matches(body.get("source_dir"))
+        if err:
+            self.send_json({"error": err}, 409)
+            return
+        try:
+            top_k = int(body.get("top_k") or semantic_search.MAX_RESULTS)
+        except (TypeError, ValueError):
+            top_k = semantic_search.MAX_RESULTS
+        top_k = max(1, min(semantic_search.MAX_RESULTS, top_k))
+        try:
+            import api_rerank
+            api_opts = {"provider": api_rerank.get_settings()["provider"]}
+        except Exception:
+            api_opts = {}
+        try:
+            out = semantic_search.search(
+                result, root, query, band=band, top_k=top_k,
+                use_api=bool(body.get("use_api")), api_opts=api_opts)
+            out["source_dir"] = os.path.abspath(root)
+            self.send_json(out)
+        except Exception as e:
+            self.send_json({"error": "语义搜索失败：%s" % e}, 500)
+
+    def _handle_settings(self):
+        body = self.read_json()
+        if body is None:
+            self.send_json({"error": "请求体不是合法 JSON"}, 400)
+            return
+        try:
+            import api_rerank
+        except Exception as e:
+            self.send_json({"error": "API 精排模块不可用：%s" % e}, 500)
+            return
+        try:
+            if body.get("clear_key"):
+                api_rerank.clear_key()
+            api_key = body.get("api_key")
+            if isinstance(api_key, str) and api_key.strip():
+                api_rerank.set_key(api_key)
+            patch = {k: body[k] for k in
+                     ("provider", "base_url", "model", "privacy_ack")
+                     if k in body}
+            if patch:
+                api_rerank.update_settings(patch)
+            self.send_json(api_rerank.public_settings())
+        except ValueError as e:
+            self.send_json({"error": str(e)}, 400)
+        except Exception as e:
+            self.send_json({"error": "保存设置失败：%s" % e}, 500)
 
     def _handle_delete(self):
         body = self.read_json()
@@ -507,6 +711,27 @@ class Handler(BaseHTTPRequestHandler):
                 out["source_dir"] = items[idx].get("source_dir")
                 results[idx] = out
 
+        # 3.3.0：删除成功后同步剔除语义向量，避免已删图继续出现在搜图结果里。
+        deleted = [r.get("id") for r in results if r and r.get("ok")]
+        if deleted:
+            try:
+                import semantic_search
+                by_id = {im["id"]: im.get("sha256")
+                         for im in result["images"] if "error" not in im}
+                deleted_shas = {by_id.get(i) for i in deleted} - {None}
+                gone = set(deleted)
+                remaining = {im.get("sha256") for im in result["images"]
+                             if "error" not in im and im["id"] not in gone}
+                removed = semantic_search.forget_images(deleted_shas,
+                                                         remaining)
+                if removed:
+                    for r in results:
+                        if r:
+                            r["semantic_vectors_removed"] = removed
+            except Exception:
+                # 索引剔除失败不影响删除结果（下次搜索会按 sha 集合自动清理）
+                pass
+
         self.send_json({"results": results})
 
 
@@ -526,7 +751,7 @@ def pick_port(preferred):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="Shiying-3.2.0 本地服务（仅监听 127.0.0.1）")
+        description="Shiying-3.3.0 本地服务（仅监听 127.0.0.1）")
     ap.add_argument("--port", type=int, default=0,
                     help="指定端口（默认自动在 8765~8774 间选空闲端口）")
     ap.add_argument("--no-open", action="store_true",
@@ -557,7 +782,8 @@ def main(argv=None):
         write_info(lock_path, {"pid": os.getpid(), "url": url,
                                "version": VERSION})
     print("Shiying-%s 本地服务已启动：%s" % (VERSION, url))
-    print("只监听本机（127.0.0.1），不对局域网/外网开放，零外部请求。")
+    print("只监听本机（127.0.0.1），不对局域网/外网开放；"
+          "联网仅限你主动触发的模型下载与可选 API 精排。")
     info = data_dir_info()
     if info["data_dir_fallback"]:
         print("注意：程序目录不可写，日志与隔离区已回退到 %s"

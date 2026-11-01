@@ -1,20 +1,20 @@
 @echo off
-REM Shiying-3.2.0 · Windows 双击启动入口
+REM Shiying-3.3.0 · Windows 双击启动入口
 REM 双击本文件打开 app_native.py 的原生窗口（pywebview，缺省回退
 REM Chrome/Edge 的 --app 应用窗口）；用完后点页面“停止服务”，
 REM 窗口与服务会一起关闭，不驻留后台。
 REM
-REM 3.2.0：
+REM 3.3.0（沿用 3.2.0 的启动加固）：
 REM   - chcp 65001 + PYTHONUTF8=1：中文文件夹与中文照片名不乱码；
-REM   - 启动前检查 Pillow，缺依赖时自动 pip install -r requirements.txt，
-REM     装完仍缺才报错停住；
+REM   - 启动前检查 Pillow 与 onnxruntime，任一缺失时自动 pip install -r requirements.txt，
+REM     装完仍缺才报错停住（3.3.0 语义搜图新增 onnxruntime 依赖，旧版只查 Pillow 会漏装）；
 REM   - 任何失败路径末尾都有 pause，窗口绝不一闪而过；
 REM   - 单实例锁：已有实例在运行时 app_native 会提示并退出，不会开第二个窗口。
 REM 注意：本机 Linux 无法执行 .bat，本文件只做内容审查，
 REM 须在 Windows 真机上实测。
 chcp 65001 >nul
 set PYTHONUTF8=1
-title Shiying-3.2.0
+title Shiying-3.3.0
 cd /d "%~dp0"
 
 REM ---- 找 Python（优先 py 启动器，其次 python）----
@@ -34,14 +34,16 @@ if "%PY%"=="" (
 )
 
 REM ---- 缺依赖时自动安装（只需成功一次）----
-%PY% -c "import PIL" >nul 2>nul
+REM P1-5：齐查 Pillow、numpy、onnxruntime、send2trash 四件套，旧版只查
+REM 前两者时，老环境缺 send2trash 也会跳过安装，导致删除退化到隔离区。
+%PY% -c "import PIL, numpy, onnxruntime, send2trash" >nul 2>nul
 if errorlevel 1 (
   echo 正在安装依赖（只需一次）：%PY% -m pip install -r requirements.txt
   %PY% -m pip install -r requirements.txt
-  %PY% -c "import PIL" >nul 2>nul
+  %PY% -c "import PIL, numpy, onnxruntime, send2trash" >nul 2>nul
   if errorlevel 1 (
     echo.
-    echo 依赖安装失败：Pillow 仍不可用。请检查网络后手动运行：
+    echo 依赖安装失败：Pillow、numpy、onnxruntime 或 send2trash 仍不可用。请检查网络后手动运行：
     echo   %PY% -m pip install -r requirements.txt
     echo 按任意键关闭本窗口。
     pause >nul

@@ -131,6 +131,40 @@
     display:flex; align-items:center; justify-content:center; text-align:center; padding:24px; }
   details{ color:var(--muted); font-size:12px; line-height:1.8; }
   details summary{ cursor:pointer; color:var(--ink); font-weight:600; font-size:12px; }
+  /* ---- 3.3.0 语义找图 ---- */
+  .searchbox{ display:flex; align-items:center; gap:8px; flex:1 1 100%; min-width:320px; }
+  .searchbox input{ flex:1; min-width:180px; }
+  .seg{ display:inline-flex; border:1px solid var(--line); border-radius:8px;
+    overflow:hidden; flex:none; }
+  .seg button{ border:0; border-radius:0; background:#fff; color:var(--muted);
+    padding:7px 12px; font-size:12px; font-weight:500; }
+  .seg button + button{ border-left:1px solid var(--line); }
+  .seg button:hover{ background:var(--hover); color:var(--ink); border-color:transparent; }
+  .seg button.active{ background:var(--ink); color:#fff; }
+  .sem-row{ display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .sem-row + .sem-row{ margin-top:18px; }
+  .sem-label{ font-size:12px; color:var(--muted); letter-spacing:.01em; }
+  .sem-label strong{ color:var(--ink); font-weight:600; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; width:180px; height:2px;
+    background:var(--line); border-radius:2px; outline:none; flex:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none;
+    width:14px; height:14px; border-radius:50%; background:var(--ink);
+    border:2px solid #fff; box-shadow:0 0 0 1px var(--ink); cursor:pointer; }
+  input[type=range]::-moz-range-thumb{ width:14px; height:14px; border-radius:50%;
+    background:var(--ink); border:2px solid #fff; box-shadow:0 0 0 1px var(--ink);
+    cursor:pointer; }
+  .progress{ height:3px; background:var(--line); border-radius:2px; overflow:hidden;
+    flex:1; min-width:140px; max-width:320px; }
+  .progress > span{ display:block; height:100%; width:0%; background:var(--ink);
+    transition:width .25s ease; }
+  .result-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:24px; margin-top:24px; }
+  @media (max-width:900px){ .result-grid{ grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:560px){ .result-grid{ grid-template-columns:1fr; } }
+  .field{ margin-bottom:16px; }
+  .field label{ display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
+  .field input, .field select{ width:100%; border:1px solid var(--line);
+    border-radius:8px; padding:8px 12px; font-size:13px; background:#fff; }
+  .field input:focus, .field select:focus{ outline:none; border-color:var(--ink); }
 </style>
 </head>
 <body>
@@ -139,7 +173,7 @@
     <div class="head-row">
       <div class="logo">P</div>
       <div>
-        <h1>拾影<span class="badge">纯本地 · 零外部请求 · v3.2.0</span></h1>
+        <h1>拾影<span class="badge">本地优先 · API 可选 · v3.3.0</span></h1>
         <div class="sub">双击打开，用完关掉，不驻留后台。删除只进回收站或隔离区，绝不直接彻底删除。</div>
       </div>
       <div class="spacer"></div>
@@ -152,9 +186,15 @@
       <button id="btn-pick">浏览选择文件夹</button>
       <button id="btn-scan" class="primary">扫描这个文件夹</button>
       <button id="btn-demo">加载演示图</button>
-      <input id="input-search" type="text" placeholder="搜索：文件名 / 人名 / 拍摄日期">
       <button id="btn-export" title="导出的清单只含相对路径，不含完整本机路径">导出清单（不含完整路径）</button>
       <button id="btn-reset" title="清空待删篓、改名与筛选（不删除任何文件）">一键重置</button>
+      <div class="searchbox">
+        <input id="input-search" type="text" placeholder="搜索：文件名 / 人名 / 拍摄日期 / 一句画面描述">
+        <div class="seg" id="search-mode" role="group" aria-label="搜索方式">
+          <button data-smode="keyword" class="active">关键词</button>
+          <button data-smode="semantic">语义找图</button>
+        </div>
+      </div>
     </div>
   </div>
 </header>
@@ -165,7 +205,36 @@
 
   <div class="bento" id="stats"></div>
 
-  <section class="card">
+  <section class="card" id="semantic-panel" style="display:none;">
+    <h2>语义找图</h2>
+    <p class="hint">用自己的话找画面，例如「海边的日落」「桌上的食物」。默认完全在本机运行（Chinese-CLIP 离线模型），只有你本次勾选 API 精排时，才会把本地前 20 张候选的 200×200 低清拼图与搜索词发给所选厂商。</p>
+    <div class="sem-row">
+      <span class="sem-label" id="sem-status">正在读取索引状态…</span>
+      <button id="btn-index" class="primary small">建立语义索引</button>
+      <button id="btn-index-pause" class="small" style="display:none;">暂停</button>
+      <button id="btn-index-cancel" class="small" style="display:none;">取消</button>
+      <div class="progress" id="sem-progress"><span></span></div>
+      <span class="sem-label" id="sem-progress-text"></span>
+    </div>
+    <div class="sem-row">
+      <span class="sem-label">置信度</span>
+      <input type="range" id="sem-band" min="0" max="2" step="1" value="1" aria-label="语义搜索置信度">
+      <span class="sem-label" id="sem-band-label"><strong>标准（推荐）</strong></span>
+      <span class="sem-label" id="sem-band-hint"></span>
+    </div>
+    <div class="sem-row">
+      <label class="sem-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="sem-use-api" style="width:14px;height:14px;accent-color:#111;">
+        本次启用 API 精排
+      </label>
+      <button id="btn-api-settings" class="small">API 设置</button>
+      <span class="sem-label" id="sem-api-state"></span>
+    </div>
+    <div class="basket-note" id="sem-notice" style="margin-top:14px;"></div>
+    <div id="sem-results"></div>
+  </section>
+
+  <section class="card" id="gallery-card">
     <h2>时光画廊</h2>
     <p class="hint">按拍摄日期分组。胶囊筛选只切换视图，不删除任何照片；点照片可看原图。搜索匹配文件名、人物名与拍摄日期。</p>
     <div class="pills" id="pills">
@@ -204,9 +273,11 @@
     <details>
       <summary>规则说明（连拍 / 推荐 / 色彩变体 / 删除 / 关闭）</summary>
       <p id="rules" style="white-space:pre-wrap;"></p>
-      <p>关闭方式：点顶部“停止服务”，窗口会连同本地服务一起关闭；在启动终端按 Ctrl+C 也会干净停止。服务只监听本机 127.0.0.1，不对外开放。想再用时，重新打开 Shiying-3.2.0（app_native）即可。</p>
+      <p>关闭方式：点顶部“停止服务”，窗口会连同本地服务一起关闭；在启动终端按 Ctrl+C 也会干净停止。服务只监听本机 127.0.0.1，不对外开放。想再用时，重新打开 Shiying-3.3.0（app_native）即可。</p>
       <p>导出说明：导出的清单只含相对扫描文件夹的相对路径与文件夹名称，不含完整本机路径、用户名或盘符；删除仍只在待删篓里二次确认后执行。</p>
       <p>人脸诚实说明：Haar 级联只能框出脸，做不了“认出同一个人”。真实人脸聚类必须走特征向量 + 聚类路线；本机若无可用模型，界面显示的即为测试分组或无分组，绝不冒充真实人脸识别。合成卡通测试图不能验证真实人脸聚类，真实人脸聚类需用真实照片在真机环境验证。</p>
+      <p>语义找图说明：默认走本机 Chinese-CLIP 离线模型，模型不随主包捆绑，首次点“建立语义索引”时才下载（约 190 MB，只需一次）。索引按文件内容 sha256 存向量，暂停后已算好的部分会落盘，下次按差集续算；删除文件后会同步剔除向量。置信度由实测余弦线性映射成 0~100 分，分宽松 / 标准 / 严格三档；演示图是合成图，真实照片上的效果须真机复测。</p>
+      <p>API 精排说明：默认关闭，只有你本次手动勾选才会调用。只上传本地粗筛前 20 张候选的 200×200 低清拼图（2 张拼图）与搜索词，不上传原图与完整路径；请求超时 9 秒，失败或无 Key 自动退回本地结果。Key 用 Windows DPAPI 加密保存（绑定当前账户），界面与日志只显示掩码。</p>
     </details>
   </section>
 </main>
@@ -224,6 +295,14 @@ const GALLERY_BATCH = 100;
 const GROUP_BATCH = 20;
 let state = { mode: "demo", demo: null, custom: null, filter: "all", search: "",
   galleryLimit: GALLERY_BATCH, pkLimit: GROUP_BATCH, burstLimit: GROUP_BATCH };
+// 3.3.0 语义找图：搜索方式（关键词/语义）、索引状态、结果与 API 设置。
+const SEM_BANDS = [
+  { key: "loose", label: "宽松", hint: "cos ≥ 0.342" },
+  { key: "standard", label: "标准（推荐）", hint: "cos ≥ 0.366" },
+  { key: "strict", label: "严格", hint: "cos ≥ 0.386" }
+];
+let sem = { mode: "keyword", status: null, settings: null, progress: null,
+  results: null, busy: false, seq: 0, timer: null, pollTimer: null };
 // P1-7：篓子条目绑定扫描文件夹（source_dir + 文件 id），换文件夹后
 // 不会把旧篓子里的同名文件算成新文件夹的文件。
 let basket = loadBasket();
@@ -390,6 +469,354 @@ async function runScan(payload, label){
     return null;
   }
   finally{ setScanBusy(false); }
+}
+
+// ---------------------------------------------------------------- 3.3.0 语义找图
+function semQuery(){ return (document.getElementById("input-search").value || "").trim(); }
+function semBand(){
+  const v = Number(document.getElementById("sem-band").value);
+  return SEM_BANDS[Math.max(0, Math.min(2, isNaN(v) ? 1 : v))];
+}
+function semSetNotice(text){
+  const el = document.getElementById("sem-notice");
+  if(el) el.textContent = text || "";
+}
+async function semFetchStatus(){
+  const src = currentSourceDir();
+  const qs = src ? ("?source_dir=" + encodeURIComponent(src)) : "";
+  try{
+    const [status, settings] = await Promise.all([
+      api("/api/semantic/status" + qs), api("/api/settings")
+    ]);
+    sem.status = status; sem.settings = settings;
+    if(status.progress) sem.progress = status.progress;
+    renderSemPanel();
+    if(status.progress && status.progress.running) semStartPoll();
+  }catch(e){
+    const el = document.getElementById("sem-status");
+    if(el) el.textContent = "语义索引状态读取失败：" + e.message;
+  }
+}
+function semCoverage(){
+  const c = (sem.status && sem.status.coverage) || { total: 0, indexed: 0 };
+  return c;
+}
+function renderSemPanel(){
+  const statusEl = document.getElementById("sem-status");
+  const textEl = document.getElementById("sem-progress-text");
+  const bar = document.querySelector("#sem-progress > span");
+  const btn = document.getElementById("btn-index");
+  const pauseBtn = document.getElementById("btn-index-pause");
+  const cancelBtn = document.getElementById("btn-index-cancel");
+  if(!statusEl) return;
+  const st = sem.status || {};
+  const model = st.model || {};
+  const p = sem.progress || {};
+  const cov = semCoverage();
+  const running = !!p.running;
+  const downloading = running && p.phase === "download";
+  let pct = 0, text = "";
+  if(running){
+    if(downloading){
+      pct = p.download_total ? (p.downloaded / p.download_total * 100) : 0;
+      text = "下载模型 " + fmtBytes(p.downloaded || 0) + " / " + fmtBytes(p.download_total || 0);
+      statusEl.textContent = p.message || "正在下载语义模型……";
+    } else {
+      pct = p.total ? (p.done / p.total * 100) : 0;
+      text = "建立索引 " + (p.done || 0) + " / " + (p.total || 0);
+      statusEl.textContent = p.message || "正在建立索引……";
+    }
+  } else {
+    pct = cov.total ? (cov.indexed / cov.total * 100) : 0;
+    text = cov.total ? ("当前文件夹 " + cov.indexed + " / " + cov.total + " 已建索引")
+                     : "先扫描一个文件夹";
+    if(!model.present){
+      statusEl.textContent = "本机还没有语义模型（首次建立索引时下载，约 190 MB，只需一次）";
+    } else if(p.paused){
+      statusEl.textContent = p.message || "索引已暂停";
+    } else if(p.error){
+      statusEl.textContent = "出错了：" + p.error;
+    } else if(st.index && st.index.incompatible){
+      statusEl.textContent = st.index.incompatible_reason || "索引需要重建";
+    } else {
+      const total = (st.index && st.index.count) || 0;
+      statusEl.innerHTML = '索引共 <strong>' + total + '</strong> 条向量 · '
+        + esc(text) + (cov.total ? '（按文件内容去重）' : '');
+    }
+  }
+  if(bar) bar.style.width = Math.max(0, Math.min(100, pct)).toFixed(1) + "%";
+  const progressWrap = document.getElementById("sem-progress");
+  if(progressWrap){
+    progressWrap.style.display = (running || (cov.total && cov.indexed < cov.total)
+      || p.paused) ? "" : "none";
+  }
+  if(textEl) textEl.textContent = running ? text : "";
+  const complete = !!(model.present && cov.total && cov.indexed >= cov.total
+    && !(st.index && st.index.incompatible));
+  if(btn){
+    btn.textContent = !model.present ? "下载模型并建立索引"
+      : (running ? "建立中…" : (complete ? "语义索引已就绪"
+        : (p.paused ? "继续建立索引" : "建立语义索引")));
+    btn.disabled = running || complete;
+  }
+  if(pauseBtn){
+    pauseBtn.style.display = (running && !downloading) ? "" : "none";
+    pauseBtn.textContent = "暂停";
+  }
+  if(cancelBtn) cancelBtn.style.display = running ? "" : "none";
+  const band = semBand();
+  document.getElementById("sem-band-label").innerHTML = "<strong>" + esc(band.label) + "</strong>";
+  document.getElementById("sem-band-hint").textContent = band.hint + "（映射自实测余弦）";
+  const apiState = document.getElementById("sem-api-state");
+  if(apiState){
+    const s = sem.settings || {};
+    if(s.has_key) apiState.textContent = "已配置 Key · " + s.masked_key + " · " + (s.key_storage || "");
+    else apiState.textContent = "未配置 Key（勾选精排会自动退回本地结果）";
+  }
+}
+async function semBuild(){
+  if(!cur()){ toast("先加载演示图或扫描一个文件夹"); return; }
+  const btn = document.getElementById("btn-index");
+  if(btn){ btn.disabled = true; btn.classList.add("loading"); }
+  try{
+    sem.progress = await api("/api/index/build",
+      { source_dir: currentSourceDir(), resume: true });
+    renderSemPanel();
+    semStartPoll();
+  }catch(e){
+    toast("建立索引失败：" + e.message);
+    sem.progress = { running: false, error: e.message };
+    renderSemPanel();
+  }finally{
+    if(btn){ btn.classList.remove("loading"); btn.disabled = false; }
+    renderSemPanel();
+  }
+}
+function semStartPoll(){
+  if(sem.pollTimer) return;
+  sem.pollTimer = setInterval(semPoll, 800);
+}
+async function semPoll(){
+  try{
+    const p = await api("/api/index_progress");
+    sem.progress = p;
+    if(p.running){ renderSemPanel(); return; }
+    clearInterval(sem.pollTimer); sem.pollTimer = null;
+    await semFetchStatus();
+    if(sem.mode === "semantic" && semQuery()) semSearchNow();
+  }catch(e){
+    clearInterval(sem.pollTimer); sem.pollTimer = null;
+  }
+}
+async function semPause(){
+  try{
+    sem.progress = await api("/api/index/pause", {});
+    renderSemPanel();
+  }catch(e){ toast("暂停失败：" + e.message); }
+}
+async function semCancel(){
+  try{
+    sem.progress = await api("/api/index/cancel", {});
+    semStartPoll();
+    toast("正在取消：已经算好的向量会保存");
+  }catch(e){ toast("取消失败：" + e.message); }
+}
+function semScheduleSearch(){
+  if(sem.mode !== "semantic") return;
+  clearTimeout(sem.timer);
+  sem.timer = setTimeout(semSearchNow, 450);
+}
+async function semSearchNow(){
+  const q = semQuery();
+  const box = document.getElementById("sem-results");
+  if(!box) return;
+  if(!q){
+    sem.results = null;
+    box.innerHTML = '<div class="empty">输入一句描述开始找图，例如「海边」「桌上的食物」「夜晚的城市」。</div>';
+    semSetNotice(""); return;
+  }
+  if(!cur()){
+    box.innerHTML = '<div class="empty">先加载演示图或扫描一个文件夹。</div>';
+    return;
+  }
+  const seq = ++sem.seq;
+  box.innerHTML = '<div class="empty">正在本地检索……</div>';
+  semSetNotice("");
+  try{
+    const out = await api("/api/semantic/search", {
+      query: q, band: semBand().key,
+      use_api: document.getElementById("sem-use-api").checked,
+      source_dir: currentSourceDir()
+    });
+    if(seq !== sem.seq) return;
+    if(!out.ok){
+      sem.results = null;
+      box.innerHTML = '<div class="empty">' + esc(out.error || "搜索失败") + '</div>';
+      if(out.need_index) semSetNotice("当前文件夹的图片还没建索引：点上方的“建立语义索引”。");
+      return;
+    }
+    sem.results = out;
+    renderSemResults();
+    const apiMeta = out.api || {};
+    if(apiMeta.notice){
+      semSetNotice(apiMeta.notice + (apiMeta.error ? "（" + apiMeta.error + "）" : ""));
+      if(apiMeta.error) toast("API 精排不可用，已退回本地结果：" + apiMeta.error);
+    } else if(apiMeta.used){
+      semSetNotice("API 精排已生效：本次只上传了 2 张 200×200 拼图（含前 20 张候选），"
+        + (apiMeta.matched || []).length + " 张被确认相关。");
+    }
+  }catch(e){
+    if(seq === sem.seq) box.innerHTML = '<div class="empty">搜索失败：' + esc(e.message) + '</div>';
+  }
+}
+function renderSemResults(){
+  const box = document.getElementById("sem-results");
+  const out = sem.results;
+  if(!box) return;
+  if(!out){ box.innerHTML = ""; return; }
+  const list = out.results || [];
+  if(!list.length){
+    box.innerHTML = '<div class="empty">没有达到「' + esc(out.band_label) + '」的结果，试试把置信度调到“宽松”。</div>';
+    return;
+  }
+  const apiConfirmed = list.some(r => r.api_matched);
+  const cards = list.map(r => {
+    const im = byId(r.id);
+    if(!im) return "";
+    const face = faceLabelOf(im.id);
+    const confLabel = (r.api_matched && r.score < out.threshold) ? "API 确认" : out.band_label;
+    return '<div class="photo" data-semopen="' + esc(im.id) + '">' +
+      '<img src="' + thumbUrl(im) + '" alt="' + esc(im.filename) + '" loading="lazy">' +
+      '<div class="meta"><div class="name">' + esc(im.filename) + '</div>' +
+      '<div class="small">相关度 ' + r.score + ' · ' + esc(confLabel) +
+      (r.api_matched ? ' · <span class="tag">API 精排</span>' : '') + '</div>' +
+      '<div class="small">' + fmtDate(im.exif_time) + (face ? ' · ' + esc(face) : '') + '</div></div></div>';
+  }).join("");
+  box.innerHTML = '<div class="sem-row" style="margin-top:24px;"><span class="sem-label">「' +
+    esc(out.query) + '」命中 <strong>' + list.length + '</strong> 张 · 置信度 ' +
+    esc(out.band_label) + '（≥ ' + out.threshold + ' 分）' +
+    (apiConfirmed ? ' · 含 API 精排确认' : '') + '</span></div>' +
+    '<div class="result-grid">' + cards + '</div>';
+  box.querySelectorAll("[data-semopen]").forEach(n =>
+    n.addEventListener("click", () => openModal(n.dataset.semopen)));
+}
+function setSearchMode(mode){
+  sem.mode = mode;
+  document.querySelectorAll("#search-mode button").forEach(b =>
+    b.classList.toggle("active", b.dataset.smode === mode));
+  const panel = document.getElementById("semantic-panel");
+  const gallery = document.getElementById("gallery-card");
+  const semantic = mode === "semantic";
+  if(panel) panel.style.display = semantic ? "" : "none";
+  if(gallery) gallery.style.display = semantic ? "none" : "";
+  document.getElementById("input-search").placeholder = semantic
+    ? "描述画面，例如：海边日落 / 桌上的食物"
+    : "搜索：文件名 / 人名 / 拍摄日期 / 一句画面描述";
+  if(semantic){
+    semFetchStatus();
+    if(semQuery()) semSearchNow();
+    else renderSemResults();
+  }
+}
+function afterDataChange(){
+  if(sem.mode === "semantic"){
+    semFetchStatus().then(() => { if(semQuery()) semSearchNow(); });
+  }
+}
+function closeModal(){ document.getElementById("modal-root").innerHTML = ""; }
+function openPrivacyModal(){
+  const root = document.getElementById("modal-root");
+  const provider = (sem.settings && (sem.settings.providers || []).find(
+    p => p.id === sem.settings.provider)) || { label: "所选厂商" };
+  root.innerHTML = '<div class="modal-bg" id="modal-bg"><div class="modal" style="max-width:560px;">' +
+    '<h3 style="margin:0 0 12px;">API 精排的隐私说明</h3>' +
+    '<p style="color:#737373;font-size:13px;line-height:1.8;margin:0 0 12px;">' +
+    '只有在你自己勾选“本次启用 API 精排”的那一次搜索里，拾影才会把：<br>' +
+    '① 本地粗筛出的前 20 张候选照片的 <strong>200×200 低清缩略图</strong>（拼成 2 张带序号的黑底图）；<br>' +
+    '② 你输入的搜索词；<br>' +
+    '通过 HTTPS 发送给 <strong>' + esc(provider.label) + '</strong> 做相关性排序。<br>' +
+    '不会上传原图、不会上传完整路径、不会上传人脸分组或拍摄时间，也不会在后台自动发送。' +
+    '不勾选时完全离线；请求超时 9 秒或失败会自动退回本地结果。</p>' +
+    '<p style="color:#737373;font-size:12px;line-height:1.7;margin:0 0 16px;">' +
+    'API Key 用 Windows DPAPI 加密保存（绑定当前 Windows 账户），界面与日志只显示掩码。</p>' +
+    '<button class="primary" id="btn-privacy-ok">我已知晓并开启</button> ' +
+    '<button id="btn-privacy-cancel">取消（仅用本地搜索）</button></div></div>';
+  document.getElementById("btn-privacy-cancel").addEventListener("click", () => {
+    document.getElementById("sem-use-api").checked = false;
+    closeModal();
+  });
+  document.getElementById("btn-privacy-ok").addEventListener("click", async () => {
+    try{
+      sem.settings = await api("/api/semantic/privacy_ack", {});
+      document.getElementById("sem-use-api").checked = true;
+      closeModal();
+      toast("已开启：只在本次勾选时精排");
+      if(semQuery()) semSearchNow();
+    }catch(e){ toast("记录隐私确认失败：" + e.message); }
+  });
+}
+function openApiSettings(){
+  const s = sem.settings || {};
+  const providers = s.providers || [];
+  const root = document.getElementById("modal-root");
+  const opts = providers.map(p =>
+    '<option value="' + esc(p.id) + '"' + (p.id === s.provider ? " selected" : "") + '>' +
+    esc(p.label) + '</option>').join("");
+  const custom = s.provider === "custom";
+  root.innerHTML = '<div class="modal-bg" id="modal-bg"><div class="modal" style="max-width:560px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+    '<h3 style="margin:0;">API 精排设置</h3><button id="btn-api-close" class="small">关闭</button></div>' +
+    '<p style="color:#737373;font-size:12px;line-height:1.7;margin:0 0 18px;">' +
+    '默认关闭，只有每次手动勾选才调用。请求走 OpenAI 兼容的 /chat/completions，超时 9 秒，失败自动退回本地。</p>' +
+    '<div class="field"><label>厂商</label><select id="api-provider">' + opts + '</select></div>' +
+    '<div class="field" id="api-custom-base" style="display:' + (custom ? "block" : "none") + ';">' +
+    '<label>base_url（到 /v1 为止）</label><input type="text" id="api-base" value="' + esc(s.custom_base_url || "") + '" placeholder="https://example.com/v1"></div>' +
+    '<div class="field" id="api-custom-model" style="display:' + (custom ? "block" : "none") + ';">' +
+    '<label>模型名</label><input type="text" id="api-model" value="' + esc(s.custom_model || "") + '" placeholder="your-vision-model"></div>' +
+    '<div class="field"><label>API Key（' + esc(s.key_storage || "") + '）</label>' +
+    '<input type="password" id="api-key" autocomplete="off" placeholder="' +
+    (s.has_key ? "已保存 " + esc(s.masked_key) + "，留空表示不修改" : "粘贴你的 API Key") + '"></div>' +
+    '<p style="color:#737373;font-size:12px;line-height:1.7;margin:0 0 16px;" id="api-endpoint-note"></p>' +
+    '<button class="primary" id="btn-api-save">保存设置</button> ' +
+    '<button id="btn-api-clear">清除 Key</button></div></div>';
+  function syncProvider(){
+    const id = document.getElementById("api-provider").value;
+    const isCustom = id === "custom";
+    document.getElementById("api-custom-base").style.display = isCustom ? "block" : "none";
+    document.getElementById("api-custom-model").style.display = isCustom ? "block" : "none";
+    const p = providers.find(x => x.id === id) || {};
+    document.getElementById("api-endpoint-note").textContent = isCustom
+      ? "自定义接口必须兼容 OpenAI 的 /chat/completions，并能接收 data:image/jpeg;base64 图片。"
+      : ("默认地址：" + (p.base_url || "") + " · 模型：" + (p.model || "") + "。" + (p.note || ""));
+  }
+  document.getElementById("api-provider").addEventListener("change", syncProvider);
+  syncProvider();
+  document.getElementById("btn-api-close").addEventListener("click", closeModal);
+  document.getElementById("btn-api-clear").addEventListener("click", async () => {
+    try{
+      sem.settings = await api("/api/settings", { clear_key: true });
+      toast("已清除 API Key");
+      closeModal(); renderSemPanel();
+    }catch(e){ toast("清除失败：" + e.message); }
+  });
+  document.getElementById("btn-api-save").addEventListener("click", async () => {
+    const provider = document.getElementById("api-provider").value;
+    const payload = { provider: provider };
+    if(provider === "custom"){
+      payload.base_url = document.getElementById("api-base").value.trim();
+      payload.model = document.getElementById("api-model").value.trim();
+      if(!payload.base_url || !payload.model){
+        toast("自定义接口需要同时填写 base_url 与模型名"); return;
+      }
+    }
+    const key = document.getElementById("api-key").value.trim();
+    if(key) payload.api_key = key;
+    try{
+      sem.settings = await api("/api/settings", payload);
+      toast(key ? "设置已保存，Key 已加密保存" : "设置已保存");
+      closeModal(); renderSemPanel();
+    }catch(e){ toast("保存失败：" + e.message); }
+  });
 }
 
 function renderFaceBanner(){
@@ -639,6 +1066,7 @@ function renderBasket(){
         saveLocal();
         toast("删除完成：文件已进回收站或隔离区，可找回");
         setTimeout(renderAll, 600);
+        afterDataChange();
       }catch(e){ resEl.textContent = "删除失败：" + e.message; }
     });
   });
@@ -678,7 +1106,43 @@ document.getElementById("pills").addEventListener("click", e => {
   const b = e.target.closest("[data-filter]"); if(!b) return;
   state.filter = b.dataset.filter; resetPaging(); renderAll();
 });
-document.getElementById("input-search").addEventListener("input", e => { state.search = e.target.value; resetPaging(); renderGallery(); });
+document.getElementById("input-search").addEventListener("input", e => {
+  if(sem.mode === "semantic"){ semScheduleSearch(); return; }
+  state.search = e.target.value; resetPaging(); renderGallery();
+});
+document.getElementById("search-mode").addEventListener("click", e => {
+  const b = e.target.closest("[data-smode]");
+  if(!b || b.dataset.smode === sem.mode) return;
+  setSearchMode(b.dataset.smode);
+});
+document.getElementById("sem-band").addEventListener("input", () => {
+  renderSemPanel();
+  if(semQuery()) semScheduleSearch();
+});
+document.getElementById("btn-index").addEventListener("click", semBuild);
+document.getElementById("btn-index-pause").addEventListener("click", semPause);
+document.getElementById("btn-index-cancel").addEventListener("click", semCancel);
+document.getElementById("btn-api-settings").addEventListener("click", async () => {
+  if(!sem.settings) await semFetchStatus();
+  openApiSettings();
+});
+document.getElementById("sem-use-api").addEventListener("change", async e => {
+  if(!e.target.checked) return;
+  if(!sem.settings) await semFetchStatus();
+  const s = sem.settings || {};
+  if(!s.has_key){
+    e.target.checked = false;
+    openApiSettings();
+    toast("先配置 API Key 再启用精排");
+    return;
+  }
+  if(!s.privacy_ack){
+    e.target.checked = false;
+    openPrivacyModal();
+    return;
+  }
+  if(semQuery()) semSearchNow();
+});
 document.getElementById("tab-demo").addEventListener("click", async () => {
   if(scanBusy){ toast("正在扫描中，请稍候"); return; }
   state.mode = "demo";
@@ -686,14 +1150,14 @@ document.getElementById("tab-demo").addEventListener("click", async () => {
     const data = await runScan({ demo: true }, "加载演示中…");
     if(data) state.demo = data;
   }
-  resetPaging(); renderAll();
+  resetPaging(); renderAll(); afterDataChange();
 });
 document.getElementById("tab-custom").addEventListener("click", () => { state.mode = "custom"; resetPaging(); renderAll(); });
 document.getElementById("btn-demo").addEventListener("click", async () => {
   const data = await runScan({ demo: true }, "加载演示中…");
   if(!data){ return; }
   state.demo = data; state.mode = "demo";
-  toast("演示数据已加载（25 张合成测试图）"); resetPaging(); renderAll();
+  toast("演示数据已加载（25 张合成测试图）"); resetPaging(); renderAll(); afterDataChange();
 });
 document.getElementById("btn-pick").addEventListener("click", async () => {
   // P1-1：对话框在服务端子进程里弹，这里只等结果；等待期间按钮禁用，
@@ -723,14 +1187,14 @@ document.getElementById("btn-scan").addEventListener("click", async () => {
   const data = await runScan({ path: path }, "扫描中…");
   if(!data){ return; }
   state.custom = data;
-  state.mode = "custom"; toast("扫描完成：共 " + state.custom.stats.total + " 张"); resetPaging(); renderAll();
+  state.mode = "custom"; toast("扫描完成：共 " + state.custom.stats.total + " 张"); resetPaging(); renderAll(); afterDataChange();
 });
 document.getElementById("btn-export").addEventListener("click", () => {
   const d = cur(); if(!d){ toast("还没有数据可导出"); return; }
   // P1-8：不导出本机完整绝对路径；照片路径都是相对扫描文件夹的相对路径。
   const payload = {
     exported_at: new Date().toISOString(),
-    tool_version: "3.2.0",
+    tool_version: "3.3.0",
     source_dir_name: folderName(d.source_dir || ""),
     source_dir_note: "已脱敏：仅保留文件夹名称与相对路径，不含本机完整路径",
     stats: d.stats,
@@ -749,12 +1213,17 @@ document.getElementById("btn-export").addEventListener("click", () => {
 document.getElementById("btn-reset").addEventListener("click", () => {
   basket = []; names = {}; state.search = ""; state.filter = "all";
   document.getElementById("input-search").value = "";
+  sem.results = null; sem.seq++;
+  semSetNotice("");
+  const semBox = document.getElementById("sem-results");
+  if(semBox) semBox.innerHTML = "";
   localStorage.removeItem(LS_BASKET_V1);
   resetPaging();
   saveLocal(); toast("已重置：篓子、改名与筛选已清空（没有删除任何文件）"); renderAll();
+  if(sem.mode === "semantic") renderSemResults();
 });
 document.getElementById("btn-stop").addEventListener("click", async () => {
-  if(!confirm("确定要停止本地服务吗？停止后窗口会一起关闭，需重新打开 Shiying-3.2.0。")) return;
+  if(!confirm("确定要停止本地服务吗？停止后窗口会一起关闭，需重新打开 Shiying-3.3.0。")) return;
   try{ await api("/api/shutdown", {}); }catch(e){}
   // P0-3：先让窗口自己关（--app 模式下 window.close() 会触发进程退出；
   // pywebview 由 app_native 主线程销毁）。关不掉时才显示遮罩说明。
@@ -762,7 +1231,7 @@ document.getElementById("btn-stop").addEventListener("click", async () => {
   setTimeout(() => {
     if(document.visibilityState === "hidden") return;
     document.body.insertAdjacentHTML("beforeend",
-      '<div class="stop-overlay"><div><h2>服务已停止</h2><p style="color:#737373;">本地服务已干净停止，没有后台残留。<br>想再用时，重新打开 Shiying-3.2.0（app_native）即可。</p></div></div>');
+      '<div class="stop-overlay"><div><h2>服务已停止</h2><p style="color:#737373;">本地服务已干净停止，没有后台残留。<br>想再用时，重新打开 Shiying-3.3.0（app_native）即可。</p></div></div>');
   }, 1200);
 });
 
@@ -800,6 +1269,7 @@ if(SESSION){
   catch(e){ toast("演示加载失败：" + e.message + "（可手动输入文件夹扫描）"); }
   if(data) state.demo = data;
   renderAll();
+  semFetchStatus();
   if(basket.some(e => e.legacy)){
     toast("检测到旧版篓子条目（未绑定文件夹），已保留但不会自动删除；请从 PK 台重新加入。");
   }

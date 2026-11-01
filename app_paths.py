@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """统一的资源目录 / 可写目录解析（源码运行与 PyInstaller 打包后通用）。
 
-3.2.0 起的三层约定（P1-3）：
+3.3.0 起的三层约定（沿用 3.2.0 的约定）（P1-3）：
 
   - 资源（index.html、demo_images、models 等）：只读。打包后优先用
     sys._MEIPASS（PyInstaller 解包目录），否则用本文件所在真实目录。
