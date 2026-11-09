@@ -3,144 +3,173 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>拾影 · 本地照片整理与去重</title>
+<title>拾影 · 本地照片整理与去重 v3.4.0</title>
 <style>
   :root{
-    --bg:#FFFFFF;
-    --surface:#FAFAFA;
-    --ink:#111111;
-    --muted:#737373;
-    --line:#E5E5E5;
-    --hover:#F2F2F2;
+    --bg:#FFFFFF; --surface:#FAFAFA; --ink:#111111; --muted:#737373;
+    --line:#E5E5E5; --hover:#F2F2F2; --nav:#FFFFFF; --chip:#F5F5F5;
+    --onink:#FFFFFF; --solid:#111111;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0A0A0A; --surface:#141414; --ink:#F5F5F5; --muted:#A3A3A3;
+      --line:#262626; --hover:#1C1C1C; --nav:#0A0A0A; --chip:#171717;
+      --onink:#111111; --solid:#F5F5F5;
+    }
   }
   *{ box-sizing:border-box; }
   html{ -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
   body{ margin:0; background:var(--bg); color:var(--ink);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
     font-size:14px; line-height:1.6; }
-  header{ position:sticky; top:0; z-index:20; background:rgba(255,255,255,.94);
-    backdrop-filter:saturate(180%) blur(12px); border-bottom:1px solid var(--line); }
   .wrap{ max-width:1280px; margin:0 auto; padding:0 32px; }
-  .head-row{ display:flex; align-items:center; gap:16px; padding:22px 0 18px; flex-wrap:wrap; }
+
+  /* ---- 顶栏：不吸顶，随滚走 ---- */
+  .topbar{ border-bottom:1px solid var(--line); background:var(--bg); }
+  .topbar .wrap{ display:flex; align-items:center; gap:12px; padding:14px 32px; flex-wrap:wrap; }
   .logo{ width:36px; height:36px; border:1px solid var(--ink); border-radius:8px;
     display:flex; align-items:center; justify-content:center; font-size:14px;
     font-weight:600; letter-spacing:.02em; flex:none; }
-  h1{ font-size:16px; font-weight:600; margin:0; letter-spacing:-.01em; line-height:1.4; }
-  .sub{ color:var(--muted); font-size:12px; margin-top:4px; }
-  .badge{ display:inline-block; font-size:11px; padding:0; border-radius:0;
-    background:none; color:var(--muted); font-weight:500; letter-spacing:.04em;
-    margin-left:10px; vertical-align:middle; }
-  .badge.warn{ background:none; color:var(--muted); }
+  .brand strong{ font-size:14px; font-weight:600; letter-spacing:-.01em; }
+  .brand .path{ color:var(--muted); font-size:12px; margin-top:2px; }
   .spacer{ flex:1; }
   button, input, select{ font:inherit; }
-  button{ cursor:pointer; border:1px solid var(--line); background:#fff; color:var(--ink);
-    border-radius:8px; padding:7px 14px; font-size:13px;
+  button{ cursor:pointer; border:1px solid var(--line); background:var(--bg); color:var(--ink);
+    border-radius:8px; padding:0 12px; height:34px; font-size:13px;
     transition:background .18s ease, border-color .18s ease, color .18s ease; }
   button:hover{ background:var(--hover); border-color:#D4D4D4; }
-  button:active{ background:#EDEDED; }
+  button:active{ background:var(--hover); }
   button:focus-visible{ outline:1px solid var(--ink); outline-offset:2px; }
-  button.primary{ background:var(--ink); color:#fff; border-color:var(--ink); }
-  button.primary:hover{ background:#000; border-color:#000; }
-  button.danger{ background:var(--ink); color:#fff; border-color:var(--ink); }
-  button.danger:hover{ background:#000; border-color:#000; }
-  button.small{ padding:5px 10px; font-size:12px; }
+  button.primary{ background:var(--solid); color:var(--onink); border-color:var(--solid); font-weight:600; }
+  button.primary:hover{ background:var(--solid); border-color:var(--solid); opacity:.88; }
+  button.danger{ border-color:var(--ink); color:var(--ink); background:var(--bg); font-weight:500; }
+  button.danger:hover{ background:var(--hover); }
+  button.small{ height:28px; padding:0 10px; font-size:12px; }
   button:disabled{ opacity:.5; cursor:not-allowed; }
   button.loading::after{ content:""; display:inline-block; width:10px; height:10px;
     margin-left:8px; border:1px solid currentColor; border-right-color:transparent;
     border-radius:50%; animation:spin .7s linear infinite; vertical-align:-1px; }
   @keyframes spin{ to{ transform:rotate(360deg); } }
-  .basket-note{ color:var(--muted); font-size:12px; margin-top:6px; line-height:1.6; }
-  .basket-item.stale{ background:var(--surface); }
-  input[type=text]{ border:1px solid var(--line); border-radius:8px; padding:8px 12px;
-    background:#fff; font-size:13px; min-width:200px;
-    transition:border-color .18s ease; }
-  input[type=text]:focus{ outline:none; border-color:var(--ink); }
-  input[type=text]::placeholder{ color:#A3A3A3; }
-  .toolbar{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; padding:0 0 20px; }
-  .toolbar input.path{ min-width:300px; flex:1; }
-  main{ padding:40px 0 96px; }
-  .bento{ display:grid; grid-template-columns:repeat(4,1fr); gap:24px; margin-bottom:32px; }
-  @media (max-width:900px){ .bento{ grid-template-columns:repeat(2,1fr); } }
-  .stat{ background:#fff; border:1px solid var(--line); border-radius:12px;
-    padding:24px; transition:border-color .2s ease, background .2s ease; }
-  .stat:hover{ border-color:#D4D4D4; background:#FCFCFC; }
-  .stat .num{ font-size:26px; font-weight:600; margin-top:8px; letter-spacing:-.02em; }
-  .stat .lbl{ color:var(--muted); font-size:12px; font-weight:500; letter-spacing:.02em; }
-  section.card{ background:var(--surface); border:1px solid var(--line); border-radius:12px;
-    padding:32px; margin-bottom:32px; }
-  section.card h2{ margin:0 0 8px; font-size:16px; font-weight:600; letter-spacing:.01em; }
-  section.card p.hint{ color:var(--muted); font-size:12px; margin:0 0 24px;
-    line-height:1.7; max-width:820px; }
-  .pills{ display:flex; gap:20px; flex-wrap:wrap; margin-bottom:24px;
+  .toggle{ display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; font-size:13px; flex:none; }
+  .toggle button{ border:0; border-radius:0; background:transparent; color:var(--muted);
+    height:34px; padding:0 12px; font-size:13px; font-weight:400; }
+  .toggle button + button{ border-left:1px solid var(--line); }
+  .toggle button:hover{ background:var(--hover); }
+  .toggle button.on{ background:var(--chip); color:var(--ink); font-weight:600; }
+  .more-wrap{ position:relative; flex:none; }
+  .more-menu{ display:none; position:absolute; right:0; top:calc(100% + 6px); z-index:30;
+    min-width:340px; background:var(--bg); border:1px solid var(--line); border-radius:10px;
+    padding:14px; box-shadow:0 8px 24px rgba(0,0,0,.10); }
+  .more-menu.open{ display:block; }
+  .more-menu .row{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .more-menu .row:last-child{ margin-bottom:0; }
+  .more-menu .row button{ flex:none; }
+  .more-menu input.path{ flex:1; min-width:100%; }
+
+  /* ---- 吸顶导航：唯一 sticky，48px，纯色不透明 ---- */
+  nav.tabs{ position:sticky; top:0; z-index:20; background:var(--nav);
     border-bottom:1px solid var(--line); }
-  .pill{ border:0; background:none; color:var(--muted); border-radius:0;
-    padding:0 0 10px; font-size:12px; font-weight:500; border-bottom:1px solid transparent;
-    margin-bottom:-1px; transition:color .18s ease, border-color .18s ease; }
-  .pill:hover{ background:none; color:var(--ink); border-color:transparent; }
-  .pill.active{ background:none; color:var(--ink); border-color:var(--ink); }
-  .timeline h3{ font-size:12px; font-weight:600; margin:32px 0 14px; color:var(--muted);
-    letter-spacing:.04em; }
-  .timeline:first-child h3{ margin-top:0; }
-  .grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:24px; }
+  nav.tabs .wrap{ display:flex; align-items:center; gap:28px; height:48px; overflow-x:auto; }
+  nav.tabs a{ display:inline-flex; align-items:center; gap:2px; height:48px; padding:0 2px;
+    color:var(--muted); text-decoration:none; font-size:14px; font-weight:500;
+    white-space:nowrap; cursor:pointer; border-bottom:2px solid transparent; }
+  nav.tabs a:hover{ color:var(--ink); }
+  nav.tabs a.on{ color:var(--ink); border-bottom-color:var(--ink); }
+  nav.tabs a .cnt{ font-size:12px; color:var(--muted); margin-left:4px; font-weight:400; }
+  nav.tabs .search{ margin-left:auto; display:flex; gap:8px; align-items:center; flex:none; }
+  nav.tabs input[type=text]{ border:1px solid var(--line); border-radius:8px; padding:0 10px;
+    height:32px; font-size:13px; background:var(--bg); color:var(--ink); width:200px; }
+  nav.tabs input[type=text]:focus{ outline:none; border-color:var(--ink); }
+  nav.tabs input[type=text]::placeholder{ color:#A3A3A3; }
+  .seg{ display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; flex:none; }
+  .seg button{ border:0; border-radius:0; background:transparent; color:var(--muted);
+    padding:0 10px; height:32px; font-size:12px; font-weight:500; }
+  .seg button + button{ border-left:1px solid var(--line); }
+  .seg button:hover{ background:var(--hover); color:var(--ink); }
+  .seg button.on{ background:var(--chip); color:var(--ink); font-weight:600; }
+
+  /* ---- 单行体检条：44px，一行纯文字 + 1px 底线 ---- */
+  .summary-bar{ display:flex; align-items:center; gap:24px; padding:12px 0;
+    border-bottom:1px solid var(--line); font-size:13px; flex-wrap:wrap; min-height:44px; }
+  .summary-bar strong{ font-weight:600; }
+  .summary-bar a{ font-size:13px; color:var(--ink); font-weight:500;
+    text-decoration:underline; text-underline-offset:4px; cursor:pointer; margin-left:6px; }
+  .hero-empty{ text-align:center; padding:72px 16px; border-bottom:1px solid var(--line); }
+  .hero-empty h2{ font-size:22px; font-weight:600; margin:0 0 10px; }
+  .hero-empty .note{ margin:0 0 20px; }
+
+  /* ---- 通用区块 ---- */
+  .view{ display:none; padding-bottom:96px; }
+  .view.on{ display:block; }
+  h2.section-title, h3.section-title, .timeline h3, .view h2, .view h3{
+    scroll-margin-top:56px; }
+  h2.section-title{ font-size:16px; font-weight:500; margin:24px 0 8px; }
+  h3.section-title{ font-size:15px; font-weight:500; margin:24px 0 8px; }
+  .note{ color:var(--muted); font-size:13px; line-height:1.7; margin:0 0 16px; }
+  .banner{ border:1px solid var(--line); border-radius:8px; padding:12px 16px;
+    margin:16px 0; font-size:13px; color:var(--muted); line-height:1.7; }
+  .panel{ border:1px solid var(--line); border-radius:10px; padding:20px 22px; margin-top:16px; }
+  .loadmore{ text-align:center; margin-top:16px; }
+
+  /* ---- 筛选胶囊（与 v2 样品一致的圆角胶囊）---- */
+  .pills{ display:flex; gap:8px; flex-wrap:wrap; margin:16px 0; }
+  .pills .pill{ display:inline-flex; align-items:center; gap:4px; height:auto;
+    border:1px solid var(--line); border-radius:999px; background:transparent;
+    color:var(--muted); padding:6px 14px; font-size:13px; font-weight:400; line-height:1.5; }
+  .pills .pill:hover{ background:var(--hover); }
+  .pills .pill.active{ border-color:var(--ink); color:var(--ink); font-weight:500; }
+  .pills .pill .c{ color:var(--muted); font-size:12px; font-weight:400; }
+
+  /* ---- 照片网格 ---- */
+  .timeline h3{ font-size:13px; font-weight:600; margin:24px 0 12px; color:var(--muted);
+    letter-spacing:.02em; }
+  .timeline:first-child h3{ margin-top:16px; }
+  .grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:20px; }
   @media (max-width:900px){ .grid{ grid-template-columns:repeat(2,1fr); } }
   @media (max-width:560px){ .grid{ grid-template-columns:1fr; } }
-  .photo{ border:1px solid var(--line); border-radius:10px; overflow:hidden; background:#fff;
+  .photo{ border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--bg);
     transition:border-color .2s ease, transform .2s ease; cursor:pointer; }
-  .photo:hover{ transform:translateY(-2px); border-color:#111; }
+  .photo:hover{ transform:translateY(-2px); border-color:var(--ink); }
   .photo img{ width:100%; height:180px; object-fit:cover; display:block; background:var(--surface); }
-  .photo .meta{ padding:14px 16px 16px; }
+  .photo .meta{ padding:12px 14px; }
   .photo .name{ font-size:13px; font-weight:500; word-break:break-all; }
-  .photo .small{ color:var(--muted); font-size:11px; margin-top:4px; }
-  .tag{ display:inline-block; font-size:11px; padding:0; border-radius:0;
-    background:none; color:var(--muted); margin-right:12px; letter-spacing:.02em; }
-  .tag.burst, .tag.shot, .tag.noexif{ background:none; color:var(--muted); }
-  .pk{ border:1px solid var(--line); border-radius:10px; padding:24px; margin-bottom:24px;
-    background:#fff; }
-  .pk .pk-head{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
-  .pk .vs{ display:grid; grid-template-columns:1fr 48px 1fr; gap:16px; align-items:start; }
-  @media (max-width:700px){ .pk .vs{ grid-template-columns:1fr; } .pk .vs .vs-mid{ text-align:left; padding-top:0; } }
-  .vs-mid{ text-align:center; font-weight:500; color:#A3A3A3; padding-top:80px;
-    font-size:12px; letter-spacing:.08em; }
-  .keep-badge{ background:none; color:var(--ink); font-size:11px; font-weight:600;
-    padding:0; border-radius:0; letter-spacing:.04em; }
-  .color-badge{ background:none; color:var(--muted); font-size:11px; font-weight:500;
-    padding:0; border-radius:0; }
-  .discard{ border:1px solid var(--line); border-radius:10px; padding:14px;
-    margin-bottom:14px; background:var(--surface); }
-  .face{ display:flex; gap:20px; align-items:center; border:1px solid var(--line);
-    border-radius:10px; padding:20px; margin-bottom:16px; background:#fff; }
-  .avatar{ width:56px; height:56px; border-radius:50%; object-fit:cover; background:var(--surface);
-    border:1px solid var(--line); flex:none; }
+  .photo .small{ color:var(--muted); font-size:12px; margin-top:4px; font-weight:400; word-break:break-all; }
+
+  /* ---- 去重 PK 卡（完整 PK 结构）---- */
+  .pkcard{ border:1px solid var(--line); border-radius:10px; padding:16px; margin-top:16px; background:var(--bg); }
+  .pkcard .reason{ font-size:13px; color:var(--muted); margin-bottom:12px; line-height:1.7; }
+  .pk{ display:grid; grid-template-columns:1fr 48px 1fr; gap:20px; align-items:start; }
+  @media (max-width:700px){ .pk{ grid-template-columns:1fr; } .pk .vs{ padding-top:0; text-align:left; } }
+  .pk .vs{ text-align:center; color:var(--muted); padding-top:80px; font-size:13px; letter-spacing:.08em; }
+  .keep-badge{ display:block; color:var(--ink); font-size:11px; font-weight:600;
+    letter-spacing:.04em; margin-bottom:8px; }
+  .color-badge{ color:var(--muted); font-size:11px; font-weight:500; }
+  .discard{ border:1px solid var(--line); border-radius:10px; padding:12px;
+    margin-bottom:12px; background:var(--surface); }
+  .discard:last-child{ margin-bottom:0; }
+  .discard .discard-note{ margin-top:8px; font-size:12px; color:var(--muted); }
+  .discard button{ margin-top:10px; }
+
+  /* ---- 人物卡 ---- */
+  .person{ display:flex; gap:16px; align-items:center; border:1px solid var(--line);
+    border-radius:10px; padding:12px; margin-top:12px; background:var(--bg); }
+  .avatar{ width:56px; height:56px; border-radius:50%; object-fit:cover;
+    background:var(--surface); border:1px solid var(--line); flex:none; }
+  .person input[type=text]{ border:1px solid var(--line); border-radius:8px; padding:6px 10px;
+    font-size:13px; background:var(--bg); color:var(--ink); margin-top:4px; height:32px; }
+  .person input[type=text]:focus{ outline:none; border-color:var(--ink); }
+  .review-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+
+  /* ---- 待删篓 ---- */
   .basket-item{ display:flex; gap:16px; align-items:center; border:1px solid var(--line);
-    border-radius:10px; padding:14px 16px; margin-bottom:12px; background:#fff; }
+    border-radius:10px; padding:14px 16px; margin-bottom:12px; background:var(--bg); }
+  .basket-item.stale{ background:var(--surface); }
   .basket-item img{ width:64px; height:64px; object-fit:cover; border-radius:8px; background:var(--surface); }
+  .basket-note{ color:var(--muted); font-size:12px; margin-top:6px; line-height:1.6; }
   .confirm-box{ border:1px solid var(--ink); border-radius:10px; padding:24px;
     background:var(--surface); margin-top:20px; }
-  .toast-wrap{ position:fixed; right:24px; bottom:24px; z-index:50; display:flex;
-    flex-direction:column; gap:10px; }
-  .toast{ background:var(--ink); color:#fff; padding:12px 16px; border-radius:8px;
-    box-shadow:0 8px 24px rgba(0,0,0,.12); font-size:13px; max-width:360px; }
-  .empty{ color:var(--muted); text-align:center; padding:56px 16px; font-size:13px; }
-  .modal-bg{ position:fixed; inset:0; background:rgba(17,17,17,.4); z-index:60;
-    display:flex; align-items:center; justify-content:center; padding:24px;
-    backdrop-filter:blur(4px); }
-  .modal{ background:#fff; border:1px solid var(--line); border-radius:12px;
-    max-width:860px; width:100%; padding:24px; max-height:90vh; overflow:auto; }
-  .modal img{ width:100%; border-radius:8px; background:var(--surface); }
-  .stop-overlay{ position:fixed; inset:0; background:rgba(255,255,255,.98); z-index:100;
-    display:flex; align-items:center; justify-content:center; text-align:center; padding:24px; }
-  details{ color:var(--muted); font-size:12px; line-height:1.8; }
-  details summary{ cursor:pointer; color:var(--ink); font-weight:600; font-size:12px; }
-  /* ---- 3.3.0 语义找图 ---- */
-  .searchbox{ display:flex; align-items:center; gap:8px; flex:1 1 100%; min-width:320px; }
-  .searchbox input{ flex:1; min-width:180px; }
-  .seg{ display:inline-flex; border:1px solid var(--line); border-radius:8px;
-    overflow:hidden; flex:none; }
-  .seg button{ border:0; border-radius:0; background:#fff; color:var(--muted);
-    padding:7px 12px; font-size:12px; font-weight:500; }
-  .seg button + button{ border-left:1px solid var(--line); }
-  .seg button:hover{ background:var(--hover); color:var(--ink); border-color:transparent; }
-  .seg button.active{ background:var(--ink); color:#fff; }
+
+  /* ---- 语义找图 ---- */
   .sem-row{ display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
   .sem-row + .sem-row{ margin-top:18px; }
   .sem-label{ font-size:12px; color:var(--muted); letter-spacing:.01em; }
@@ -149,135 +178,275 @@
     background:var(--line); border-radius:2px; outline:none; flex:none; }
   input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none;
     width:14px; height:14px; border-radius:50%; background:var(--ink);
-    border:2px solid #fff; box-shadow:0 0 0 1px var(--ink); cursor:pointer; }
+    border:2px solid var(--bg); box-shadow:0 0 0 1px var(--ink); cursor:pointer; }
   input[type=range]::-moz-range-thumb{ width:14px; height:14px; border-radius:50%;
-    background:var(--ink); border:2px solid #fff; box-shadow:0 0 0 1px var(--ink);
-    cursor:pointer; }
+    background:var(--ink); border:2px solid var(--bg); box-shadow:0 0 0 1px var(--ink); cursor:pointer; }
   .progress{ height:3px; background:var(--line); border-radius:2px; overflow:hidden;
     flex:1; min-width:140px; max-width:320px; }
-  .progress > span{ display:block; height:100%; width:0%; background:var(--ink);
-    transition:width .25s ease; }
-  .result-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:24px; margin-top:24px; }
+  .progress > span{ display:block; height:100%; width:0%; background:var(--ink); transition:width .25s ease; }
+  .result-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:20px; margin-top:24px; }
   @media (max-width:900px){ .result-grid{ grid-template-columns:repeat(2,1fr); } }
   @media (max-width:560px){ .result-grid{ grid-template-columns:1fr; } }
   .field{ margin-bottom:16px; }
   .field label{ display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
   .field input, .field select{ width:100%; border:1px solid var(--line);
-    border-radius:8px; padding:8px 12px; font-size:13px; background:#fff; }
+    border-radius:8px; padding:8px 12px; font-size:13px; background:var(--bg); color:var(--ink); }
   .field input:focus, .field select:focus{ outline:none; border-color:var(--ink); }
+
+  /* ---- 3.4.0 复核表（三卡片 + 单脸行 + 批量条 + 撤销面板）---- */
+  .rev-head{ display:flex; align-items:baseline; justify-content:space-between;
+    gap:12px; flex-wrap:wrap; }
+  .revcard{ border:1px solid var(--line); border-radius:10px; margin-top:14px;
+    overflow:hidden; background:var(--bg); }
+  .revcard > header{ display:flex; align-items:center; gap:12px; padding:10px 16px;
+    border-bottom:1px solid var(--line); background:var(--surface); flex-wrap:wrap; }
+  .revcard > header strong{ font-size:13px; font-weight:600; letter-spacing:.01em; }
+  .revcard > header .c{ color:var(--muted); font-size:12px; font-weight:400; }
+  .revcard > header .sp{ flex:1; min-width:8px; }
+  .revcard > header label{ display:inline-flex; align-items:center; gap:6px;
+    font-size:12px; color:var(--muted); cursor:pointer; user-select:none; }
+  .revcard > header label:hover{ color:var(--ink); }
+  .revrow{ display:grid; grid-template-columns:24px 76px minmax(0,1fr) minmax(0,1.05fr) auto;
+    gap:14px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); }
+  .revrow:last-child{ border-bottom:0; }
+  .revrow.sel{ background:var(--hover); }
+  .revrow:hover{ background:var(--hover); }
+  .revchk{ width:15px; height:15px; accent-color:var(--ink); cursor:pointer; }
+  .revcrop{ width:76px; height:76px; border-radius:8px; border:1px solid var(--line);
+    background:var(--surface); object-fit:cover; display:block; cursor:zoom-in;
+    padding:4px; box-sizing:border-box; }
+  .revmeta .rname{ font-size:13px; font-weight:500; word-break:break-all; }
+  .revmeta .rsub{ color:var(--muted); font-size:12px; margin-top:3px; }
+  .revsug .who{ font-size:13px; font-weight:500; }
+  .revsug .score{ font-variant-numeric:tabular-nums; font-weight:600; margin-left:6px; }
+  .revsug .alt{ color:var(--muted); font-size:12px; margin-top:3px; line-height:1.5; }
+  .revactions{ display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  .revactions button{ height:28px; padding:0 10px; font-size:12px; white-space:nowrap; }
+  .revempty{ color:var(--muted); font-size:13px; padding:26px 16px; line-height:1.7; }
+  .batchbar{ position:sticky; top:48px; z-index:15; display:flex; align-items:center;
+    gap:10px; flex-wrap:wrap; margin-top:14px; padding:10px 14px;
+    border:1px solid var(--ink); border-radius:10px; background:var(--bg);
+    box-shadow:0 6px 18px rgba(0,0,0,.06); }
+  .batchbar .n{ font-size:13px; font-weight:600; }
+  .revhist{ border:1px solid var(--line); border-radius:10px; margin-top:12px;
+    overflow:hidden; }
+  .revhist-item{ display:flex; align-items:center; gap:10px; padding:10px 16px;
+    border-bottom:1px solid var(--line); font-size:13px; }
+  .revhist-item:last-child{ border-bottom:0; }
+  .revhist-item .t{ color:var(--muted); font-size:12px; margin-left:auto;
+    white-space:nowrap; }
+  .revhist-item.done{ color:var(--muted); }
+  .revhist-item .tagmini{ color:var(--muted); font-size:11px; border:1px solid var(--line);
+    border-radius:999px; padding:1px 8px; }
+  .fullbox{ position:relative; display:inline-block; max-width:100%; line-height:0;
+    margin-top:12px; }
+  .fullbox img{ display:block; width:100%; border-radius:8px; background:var(--surface); }
+  .facebox{ position:absolute; border:2px solid var(--ink); border-radius:2px;
+    pointer-events:none; box-shadow:0 0 0 1px rgba(255,255,255,.5) inset; }
+  .revpicker{ display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+  .revpicker button{ text-align:left; height:34px; }
+  @media (max-width:820px){
+    .revrow{ grid-template-columns:24px 64px minmax(0,1fr); }
+    .revsug{ grid-column:2 / 4; }
+    .revactions{ grid-column:2 / 4; justify-content:flex-start; }
+  }
+
+  /* ---- 空状态 / 提示 / 弹层 ---- */
+  .empty{ color:var(--muted); text-align:center; padding:64px 16px; font-size:13px; }
+  .empty h3{ font-size:18px; color:var(--ink); font-weight:500; margin:0 0 8px; }
+  .empty p{ margin:0 0 16px; line-height:1.8; }
+  .toast-wrap{ position:fixed; right:24px; bottom:24px; z-index:50; display:flex;
+    flex-direction:column; gap:10px; }
+  .toast{ background:var(--solid); color:var(--onink); padding:12px 16px; border-radius:8px;
+    box-shadow:0 8px 24px rgba(0,0,0,.12); font-size:13px; max-width:360px; }
+  .modal-bg{ position:fixed; inset:0; background:rgba(17,17,17,.4); z-index:60;
+    display:flex; align-items:center; justify-content:center; padding:24px;
+    backdrop-filter:blur(4px); }
+  .modal{ background:var(--bg); border:1px solid var(--line); border-radius:12px;
+    max-width:860px; width:100%; padding:24px; max-height:90vh; overflow:auto; }
+  .modal img{ width:100%; border-radius:8px; background:var(--surface); }
+  .stop-overlay{ position:fixed; inset:0; background:var(--bg); z-index:100;
+    display:flex; align-items:center; justify-content:center; text-align:center; padding:24px; }
+  details{ color:var(--muted); font-size:12px; line-height:1.8; margin-top:24px;
+    border-top:1px solid var(--line); padding-top:16px; }
+  details summary{ cursor:pointer; color:var(--ink); font-weight:600; font-size:12px; }
+  .rules-note{ color:var(--muted); font-size:12px; line-height:1.8; white-space:pre-wrap; }
+  @media (max-width:700px){
+    .wrap{ padding:0 16px; }
+    .topbar .wrap{ padding:14px 16px; }
+    nav.tabs .wrap{ gap:18px; }
+  }
 </style>
 </head>
 <body>
-<header>
+
+<!-- 顶栏：不吸顶，随滚走 -->
+<header class="topbar">
   <div class="wrap">
-    <div class="head-row">
-      <div class="logo">P</div>
-      <div>
-        <h1>拾影<span class="badge">本地优先 · API 可选 · v3.3.0</span></h1>
-        <div class="sub">双击打开，用完关掉，不驻留后台。删除只进回收站或隔离区，绝不直接彻底删除。</div>
-      </div>
-      <div class="spacer"></div>
-      <button id="btn-stop" title="彻底停止本地服务">停止服务</button>
+    <div class="logo">拾</div>
+    <div class="brand">
+      <strong>拾影 v3.4.0</strong>
+      <div class="path" id="source-label">当前：演示数据（25 张合成图）</div>
     </div>
-    <div class="toolbar">
-      <button id="tab-demo" class="pill active">演示数据</button>
-      <button id="tab-custom" class="pill">我的文件夹</button>
-      <input id="input-path" class="path" type="text" placeholder="输入本地文件夹路径，例如：D:\照片 或 /home/你的照片">
-      <button id="btn-pick">浏览选择文件夹</button>
-      <button id="btn-scan" class="primary">扫描这个文件夹</button>
-      <button id="btn-demo">加载演示图</button>
-      <button id="btn-export" title="导出的清单只含相对路径，不含完整本机路径">导出清单（不含完整路径）</button>
-      <button id="btn-reset" title="清空待删篓、改名与筛选（不删除任何文件）">一键重置</button>
-      <div class="searchbox">
-        <input id="input-search" type="text" placeholder="搜索：文件名 / 人名 / 拍摄日期 / 一句画面描述">
-        <div class="seg" id="search-mode" role="group" aria-label="搜索方式">
-          <button data-smode="keyword" class="active">关键词</button>
-          <button data-smode="semantic">语义找图</button>
+    <div class="spacer"></div>
+    <div class="toggle" role="group" aria-label="数据源切换">
+      <button id="tab-custom">我的文件夹</button>
+      <button id="tab-demo" class="on">演示数据</button>
+    </div>
+    <button id="btn-pick-scan" class="primary">选择文件夹并扫描</button>
+    <div class="more-wrap">
+      <button id="btn-more">更多 ▾</button>
+      <div class="more-menu" id="more-menu">
+        <div class="row">
+          <input id="input-path" class="path" type="text" placeholder="输入本地文件夹路径，例如：D:\照片 或 /home/你的照片">
+        </div>
+        <div class="row">
+          <button id="btn-pick">浏览选择文件夹</button>
+          <button id="btn-scan">扫描这个文件夹</button>
+        </div>
+        <div class="row">
+          <button id="btn-demo">加载演示图</button>
+          <button id="btn-export" title="导出的清单只含相对路径，不含完整本机路径">导出清单（不含完整路径）</button>
+        </div>
+        <div class="row">
+          <button id="btn-reset" title="清空待删篓、改名与筛选（不删除任何文件）">一键重置</button>
         </div>
       </div>
     </div>
+    <button id="btn-stop" title="彻底停止本地服务">退出并停服</button>
   </div>
 </header>
 
+<!-- 吸顶导航：唯一 sticky，48px，纯色不透明 -->
+<nav class="tabs">
+  <div class="wrap">
+    <a class="on" data-tab="all">全部照片<span class="cnt" id="cnt-all">0</span></a>
+    <a data-tab="dedup">去重清理<span class="cnt" id="cnt-dedup">0</span></a>
+    <a data-tab="people">人物与复核<span class="cnt" id="cnt-people">0</span></a>
+    <a data-tab="sem">语义找图</a>
+    <a data-tab="basket">待删确认篓<span class="cnt" id="cnt-basket">0</span></a>
+    <span class="search">
+      <input id="input-search" type="text" placeholder="搜索文件名 / 人名 / 描述…">
+      <div class="seg" id="search-mode" role="group" aria-label="搜索方式">
+        <button data-smode="keyword" class="on">关键词</button>
+        <button data-smode="semantic">语义找图</button>
+      </div>
+    </span>
+  </div>
+</nav>
+
 <main class="wrap">
-  <div id="face-banner"></div>
   <div id="data-dir-note"></div>
 
-  <div class="bento" id="stats"></div>
+  <!-- 单行体检条：44px，替代原来的 hero 与 8 张数据卡 -->
+  <div class="summary-bar" id="stats"></div>
+  <!-- 未扫描（0 张照片）时才显示的空状态大标题 -->
+  <div class="hero-empty" id="hero-empty" style="display:none;">
+    <h2>开始整理你的照片</h2>
+    <p class="note">选一个文件夹，拾影会在本机完成扫描、去重与分组，不会上传任何照片。</p>
+    <button class="primary" onclick="pickAndScan()">选择文件夹并扫描</button>
+  </div>
 
-  <section class="card" id="semantic-panel" style="display:none;">
-    <h2>语义找图</h2>
-    <p class="hint">用自己的话找画面，例如「海边的日落」「桌上的食物」。默认完全在本机运行（Chinese-CLIP 离线模型），只有你本次勾选 API 精排时，才会把本地前 20 张候选的 200×200 低清拼图与搜索词发给所选厂商。</p>
-    <div class="sem-row">
-      <span class="sem-label" id="sem-status">正在读取索引状态…</span>
-      <button id="btn-index" class="primary small">建立语义索引</button>
-      <button id="btn-index-pause" class="small" style="display:none;">暂停</button>
-      <button id="btn-index-cancel" class="small" style="display:none;">取消</button>
-      <div class="progress" id="sem-progress"><span></span></div>
-      <span class="sem-label" id="sem-progress-text"></span>
-    </div>
-    <div class="sem-row">
-      <span class="sem-label">置信度</span>
-      <input type="range" id="sem-band" min="0" max="2" step="1" value="1" aria-label="语义搜索置信度">
-      <span class="sem-label" id="sem-band-label"><strong>标准（推荐）</strong></span>
-      <span class="sem-label" id="sem-band-hint"></span>
-    </div>
-    <div class="sem-row">
-      <label class="sem-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-        <input type="checkbox" id="sem-use-api" style="width:14px;height:14px;accent-color:#111;">
-        本次启用 API 精排
-      </label>
-      <button id="btn-api-settings" class="small">API 设置</button>
-      <span class="sem-label" id="sem-api-state"></span>
-    </div>
-    <div class="basket-note" id="sem-notice" style="margin-top:14px;"></div>
-    <div id="sem-results"></div>
-  </section>
-
-  <section class="card" id="gallery-card">
-    <h2>时光画廊</h2>
-    <p class="hint">按拍摄日期分组。胶囊筛选只切换视图，不删除任何照片；点照片可看原图。搜索匹配文件名、人物名与拍摄日期。</p>
+  <!-- 页签 1：全部照片 -->
+  <div class="view on" id="view-all">
     <div class="pills" id="pills">
-      <button class="pill active" data-filter="all">全部</button>
-      <button class="pill" data-filter="dated">带拍摄时间</button>
-      <button class="pill" data-filter="burst">连拍保护组</button>
-      <button class="pill" data-filter="screenshot">手机截图</button>
-      <button class="pill" data-filter="no_exif">无拍摄时间</button>
+      <button class="pill active" data-filter="all">全部 <span class="c" data-cnt="all">0</span></button>
+      <button class="pill" data-filter="dated">带拍摄时间 <span class="c" data-cnt="dated">0</span></button>
+      <button class="pill" data-filter="burst">连拍保护组 <span class="c" data-cnt="burst">0</span></button>
+      <button class="pill" data-filter="screenshot">手机截图 <span class="c" data-cnt="screenshot">0</span></button>
+      <button class="pill" data-filter="no_exif">无拍摄时间 <span class="c" data-cnt="no_exif">0</span></button>
     </div>
-    <div id="gallery"></div>
-  </section>
+    <div id="gallery-card"><div id="gallery"></div></div>
+  </div>
 
-  <section class="card">
-    <h2>双核去重 PK 台</h2>
-    <p class="hint">左侧为推荐保留，右侧为淘汰候选。点“移入待删篓”只是暂存，进篓后仍需二次确认才会删除；连拍组默认受保护，不进待删篓。</p>
+  <!-- 页签 2：去重清理 -->
+  <div class="view" id="view-dedup">
+    <h2 class="section-title">去重清理</h2>
+    <p class="note">左侧为推荐保留，右侧为淘汰候选。点「移入待删篓」只是暂存，进篓后仍需二次确认才会删除；连拍组默认受保护，不参与淘汰。</p>
     <div id="pk"></div>
-    <h2 style="margin-top:28px;">连拍保护组</h2>
-    <p class="hint">以下分组默认保护，只展示、不建议删除。</p>
+    <h3 class="section-title" id="bursts-title">连拍保护组</h3>
+    <p class="note">连拍组只推荐保留最好的一张，其余不自动删。</p>
     <div id="bursts"></div>
-  </section>
+  </div>
 
-  <section class="card">
-    <h2>人物墙</h2>
-    <p class="hint">点输入框可直接改名，改名保存在本机浏览器里（换电脑不共享）。人物分组的诚实状态见顶部横幅。</p>
-    <div id="faces"></div>
-  </section>
+  <!-- 页签 3：人物与复核 -->
+  <div class="view" id="view-people">
+    <h2 class="section-title">人物与复核</h2>
+    <div id="face-banner"></div>
+    <div class="pills" id="people-subtabs">
+      <button class="pill active" data-sub="confirmed">已确认人物 <span class="c" id="people-count-label">(0)</span></button>
+      <button class="pill" data-sub="review">待复核面孔 <span class="c" id="review-count-label">(0)</span></button>
+    </div>
+    <div id="people-confirmed"><div id="faces"></div></div>
+    <div id="people-review" style="display:none;">
+      <div class="rev-head">
+        <h3 class="section-title" style="margin-bottom:0;">待复核面孔</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="small" id="rev-refresh">刷新复核表</button>
+          <button class="small" id="rev-toggle-history">撤销面板</button>
+        </div>
+      </div>
+      <p class="note" id="rev-note">正在读取复核表…</p>
+      <div id="rev-batchbar"></div>
+      <div id="rev-cards"></div>
+      <div id="rev-history-wrap" style="display:none;">
+        <h3 class="section-title">撤销面板（本机持久记录）</h3>
+        <p class="note">每条复核操作都在本机数据文件里存了快照：批量操作可整批撤销，也可只撤销其中几张脸；若某张脸之后又被改过，会先提示你处理最新记录，不会静默覆盖。</p>
+        <div class="revhist" id="rev-history"></div>
+      </div>
+    </div>
+  </div>
 
-  <section class="card">
-    <h2>待删确认篓</h2>
-    <p class="hint">篓子里的文件还没删。点“二次确认删除”后会再弹一次确认框，只有你第二次点头，文件才会被移入系统回收站（若系统不支持，则移入工具包内的 .trash_backup 隔离文件夹），绝不直接彻底删除。</p>
+  <!-- 页签 4：语义找图 -->
+  <div class="view" id="view-sem">
+    <h2 class="section-title">语义找图</h2>
+    <p class="note">在顶部搜索框输入一句画面描述（例如「海边日落」「桌上的食物」），切换到「语义找图」即可检索；默认完全在本机离线运行。</p>
+    <section id="semantic-panel" class="panel">
+      <div class="sem-row">
+        <span class="sem-label" id="sem-status">正在读取索引状态…</span>
+        <button id="btn-index" class="small">建立语义索引</button>
+        <button id="btn-index-pause" class="small" style="display:none;">暂停</button>
+        <button id="btn-index-cancel" class="small" style="display:none;">取消</button>
+        <div class="progress" id="sem-progress"><span></span></div>
+        <span class="sem-label" id="sem-progress-text"></span>
+      </div>
+      <div class="sem-row">
+        <span class="sem-label">置信度</span>
+        <input type="range" id="sem-band" min="0" max="2" step="1" value="1" aria-label="语义搜索置信度">
+        <span class="sem-label" id="sem-band-label"><strong>标准（推荐）</strong></span>
+        <span class="sem-label" id="sem-band-hint"></span>
+      </div>
+      <div class="sem-row">
+        <label class="sem-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="sem-use-api" style="width:14px;height:14px;accent-color:#111;">
+          本次启用 API 精排
+        </label>
+        <button id="btn-api-settings" class="small">API 设置</button>
+        <span class="sem-label" id="sem-api-state"></span>
+      </div>
+      <div class="basket-note" id="sem-notice" style="margin-top:14px;"></div>
+      <div id="sem-results"></div>
+    </section>
+  </div>
+
+  <!-- 页签 5：待删确认篓 -->
+  <div class="view" id="view-basket">
+    <h2 class="section-title">待删确认篓</h2>
+    <p class="note">篓子里的文件还没删。点「二次确认删除」后会再弹一次确认框，只有第二次点头，文件才会被移入系统回收站（若不支持则移入工具包内的 .trash_backup 隔离文件夹），绝不直接彻底删除。</p>
     <div id="basket"></div>
     <div id="confirm-box" style="display:none;"></div>
-  </section>
+  </div>
 
-  <section class="card">
+  <section class="rules">
     <details>
       <summary>规则说明（连拍 / 推荐 / 色彩变体 / 删除 / 关闭）</summary>
-      <p id="rules" style="white-space:pre-wrap;"></p>
-      <p>关闭方式：点顶部“停止服务”，窗口会连同本地服务一起关闭；在启动终端按 Ctrl+C 也会干净停止。服务只监听本机 127.0.0.1，不对外开放。想再用时，重新打开 Shiying-3.3.0（app_native）即可。</p>
-      <p>导出说明：导出的清单只含相对扫描文件夹的相对路径与文件夹名称，不含完整本机路径、用户名或盘符；删除仍只在待删篓里二次确认后执行。</p>
-      <p>人脸诚实说明：Haar 级联只能框出脸，做不了“认出同一个人”。真实人脸聚类必须走特征向量 + 聚类路线；本机若无可用模型，界面显示的即为测试分组或无分组，绝不冒充真实人脸识别。合成卡通测试图不能验证真实人脸聚类，真实人脸聚类需用真实照片在真机环境验证。</p>
-      <p>语义找图说明：默认走本机 Chinese-CLIP 离线模型，模型不随主包捆绑，首次点“建立语义索引”时才下载（约 190 MB，只需一次）。索引按文件内容 sha256 存向量，暂停后已算好的部分会落盘，下次按差集续算；删除文件后会同步剔除向量。置信度由实测余弦线性映射成 0~100 分，分宽松 / 标准 / 严格三档；演示图是合成图，真实照片上的效果须真机复测。</p>
-      <p>API 精排说明：默认关闭，只有你本次手动勾选才会调用。只上传本地粗筛前 20 张候选的 200×200 低清拼图（2 张拼图）与搜索词，不上传原图与完整路径；请求超时 9 秒，失败或无 Key 自动退回本地结果。Key 用 Windows DPAPI 加密保存（绑定当前账户），界面与日志只显示掩码。</p>
+      <p class="rules-note" id="rules"></p>
+      <p class="rules-note">关闭方式：点顶部「退出并停服」，窗口会连同本地服务一起关闭；在启动终端按 Ctrl+C 也会干净停止。服务只监听本机 127.0.0.1，不对外开放。想再用时，重新打开 Shiying-3.4.0（app_native）即可。</p>
+      <p class="rules-note">导出说明：导出的清单只含相对扫描文件夹的相对路径与文件夹名称，不含完整本机路径、用户名或盘符；删除仍只在待删篓里二次确认后执行。</p>
+      <p class="rules-note">人脸诚实说明：Haar 级联只能框出脸，做不了「认出同一个人」。真实人脸聚类必须走特征向量 + 聚类路线；本机若无可用模型，界面显示的即为测试分组或无分组，绝不冒充真实人脸识别。合成卡通测试图不能验证真实人脸聚类，真实人脸聚类需用真实照片在真机环境验证。</p>
+      <p class="rules-note">复核表说明：每张脸一行，单脸主键＝照片内容哈希＋脸序号（同一份内容的多张重复照片共享同一张脸，只复核一次）。三张卡片按建议 ≥0.60 / 可疑 0.40–0.60 / 未匹配 &lt;0.40 分流，前两名相似度差小于 0.06 时会降级进可疑并同时给出两个候选。采纳建议、分到某人、新建人物、忽略都只是给这张脸定归属：绝不删除、不移动任何照片，也不与「删除照片的二次确认 / 待删确认篓」混用。忽略的脸重扫不会再出现在复核表里，照片本身还在。所有复核操作都记在本机数据文件 face_review.json（人物、每张脸当前状态、操作历史三部分），可整批撤销，也可只撤销其中几张脸；撤销旧记录时若该脸后来又被改过，会先提示你处理最新记录，不会静默覆盖。人名也在这个文件里，首次打开时会把浏览器里的旧名一次性迁过来，之后不再从浏览器读。</p>
+      <p class="rules-note">语义找图说明：默认走本机 Chinese-CLIP 离线模型，模型不随主包捆绑，首次点「建立语义索引」时才下载（约 190 MB，只需一次）。索引按文件内容 sha256 存向量，暂停后已算好的部分会落盘，下次按差集续算；删除文件后会同步剔除向量。置信度由实测余弦线性映射成 0~100 分，分宽松 / 标准 / 严格三档；演示图是合成图，真实照片上的效果须真机复测。</p>
+      <p class="rules-note">API 精排说明：默认关闭，只有你本次手动勾选才会调用。只上传本地粗筛前 20 张候选的 200×200 低清拼图（2 张拼图）与搜索词，不上传原图与完整路径；请求超时 9 秒，失败或无 Key 自动退回本地结果。Key 用 Windows DPAPI 加密保存（绑定当前账户），界面与日志只显示掩码。</p>
     </details>
   </section>
 </main>
@@ -290,12 +459,12 @@ const LS_BASKET = "photoTool.basket.v2";
 const LS_BASKET_V1 = "photoTool.basket.v1";
 const LS_NAMES = "photoTool.names.v1";
 // v3.2.0：分批渲染的每批大小。画廊每批 100 张，PK 台与
-// 连拍组每批 20 组；点“加载更多”再往后翻，几千张也不会一次建几千个 DOM 节点。
+// 连拍组每批 20 组；点「加载更多」再往后翻，几千张也不会一次建几千个 DOM 节点。
 const GALLERY_BATCH = 100;
 const GROUP_BATCH = 20;
 let state = { mode: "demo", demo: null, custom: null, filter: "all", search: "",
   galleryLimit: GALLERY_BATCH, pkLimit: GROUP_BATCH, burstLimit: GROUP_BATCH };
-// 3.3.0 语义找图：搜索方式（关键词/语义）、索引状态、结果与 API 设置。
+// 3.4.0 语义找图：搜索方式（关键词/语义）、索引状态、结果与 API 设置。
 const SEM_BANDS = [
   { key: "loose", label: "宽松", hint: "cos ≥ 0.342" },
   { key: "standard", label: "标准（推荐）", hint: "cos ≥ 0.366" },
@@ -303,10 +472,15 @@ const SEM_BANDS = [
 ];
 let sem = { mode: "keyword", status: null, settings: null, progress: null,
   results: null, busy: false, seq: 0, timer: null, pollTimer: null };
+let currentTab = "all";
 // P1-7：篓子条目绑定扫描文件夹（source_dir + 文件 id），换文件夹后
 // 不会把旧篓子里的同名文件算成新文件夹的文件。
 let basket = loadBasket();
-let names = JSON.parse(localStorage.getItem(LS_NAMES) || "{}");
+// 3.4.0：人名不再存在浏览器里。这类旧数据只在首次打开时迁移一次到
+// 本机数据文件（face_review.json），迁移成功后 localStorage 里的旧键
+// 会被删掉并留一份 .backup，之后再也不从 localStorage 读人名。
+// 旧键 photoTool.names.v1 只在迁移时读一次（见 migrateLegacyNames）。
+let names = {};   // 兼容旧代码的空壳：真实人名走 review.data.persons
 let scanBusy = false;
 
 function loadBasket(){
@@ -330,8 +504,6 @@ function loadBasket(){
     }
   }catch(e){}
   try{
-    // 旧版 v1 只存文件名，没有文件夹信息：保留显示但标记为未绑定，
-    // 绝不悄悄当成当前文件夹里的同名文件。
     const raw = localStorage.getItem(LS_BASKET_V1);
     if(raw){
       const arr = JSON.parse(raw);
@@ -349,16 +521,10 @@ function resetPaging(){
   state.burstLimit = GROUP_BATCH;
 }
 function saveLocal(){
-  // 防爆：localStorage 只存轻量状态——待删篓存 {id, source_dir}，
-  // 改名存 ID→名字映射。绝不把 Base64 缩略图字符串存进来（浏览器
-  // 5MB 上限会报错）。防御性过滤：名字里若混入 data: URI 直接丢弃。
-  for(const k of Object.keys(names)){
-    if(typeof names[k] === "string" && names[k].indexOf("data:") === 0) delete names[k];
-  }
+  // 3.4.0：人名已迁到本机数据文件（face_review.json），这里只保存待删篓。
   localStorage.setItem(LS_BASKET, JSON.stringify(basket.map(e => (
     { id: e.id, source_dir: e.source_dir || "", legacy: !!e.legacy }))));
-  localStorage.removeItem(LS_BASKET_V1);  // 迁移完成，不再重复导入旧格式
-  localStorage.setItem(LS_NAMES, JSON.stringify(names));
+  localStorage.removeItem(LS_BASKET_V1);
 }
 function folderName(p){
   if(!p) return "（未知文件夹）";
@@ -367,7 +533,6 @@ function folderName(p){
   return i >= 0 ? s.slice(i + 1) : s;
 }
 function currentSourceDir(){ const d = cur(); return d ? (d.source_dir || "") : ""; }
-// Windows 盘符路径忽略大小写；Linux/macOS 保持精确比较。
 function sameDir(a, b){
   if(!a || !b) return false;
   if(a === b) return true;
@@ -388,9 +553,6 @@ function addBasket(id){
   basket.push({ id: id, source_dir: dir, legacy: false });
 }
 function thumbUrl(im){
-  // v3.2.0：图片改走服务端动态缩略图接口 + loading=lazy，DOM 里不再
-  // 塞 Base64 字符串；屏外图片滚动到附近时才请求。没有相对路径时
-  // （极少数异常数据）回退到扫描结果里内嵌的 Base64 缩略图。
   if(im && im.relative_path) return "/api/thumb?rel=" + encodeURIComponent(im.relative_path);
   return im ? im.thumbnail : "";
 }
@@ -415,9 +577,23 @@ function fmtDate(iso){
 function cur(){ return state.mode === "demo" ? state.demo : state.custom; }
 function byId(id){ const d = cur(); if(!d) return null; return d.images.find(x => x.id === id); }
 function faceLabelOf(imageId){
-  const d = cur(); if(!d) return null;
-  for(const g of (d.face_groups || [])){
-    if(g.members.includes(imageId)) return names[g.id] || g.label;
+  if(!imageId) return null;
+  const d = review.data;
+  if(d){
+    const pm = {};
+    for(const p of (d.persons || [])) pm[p.id] = p.name || ("人物 " + p.id.slice(2));
+    const out = [];
+    for(const f of (d.confirmed_faces || [])){
+      if(f.image_id === imageId && pm[f.person_id] && out.indexOf(pm[f.person_id]) < 0){
+        out.push(pm[f.person_id]);
+      }
+    }
+    if(out.length) return out.join("、");
+  }
+  // 还没有复核数据时，退回用自动簇的分组名（标明未确认身份）。
+  const data = cur(); if(!data) return null;
+  for(const g of (data.face_groups || [])){
+    if(g.members.indexOf(imageId) >= 0) return g.label;
   }
   return null;
 }
@@ -435,8 +611,6 @@ async function api(path, body){
   if(!r.ok) throw new Error(j.error || ("请求失败：" + r.status));
   return j;
 }
-// P1-1：扫描/演示/选文件夹期间统一禁用按钮并显示加载态；服务端还有
-// 扫描锁兜底，正在扫描时再来请求会返回 409（busy）。
 function setScanBusy(on, label){
   scanBusy = !!on;
   for(const id of ["btn-scan", "btn-demo", "btn-pick"]){
@@ -463,7 +637,12 @@ function setScanBusy(on, label){
 async function runScan(payload, label){
   if(scanBusy){ toast("正在扫描中，请等当前扫描完成"); return null; }
   setScanBusy(true, label);
-  try{ return await api("/api/scan", payload); }
+  try{
+    const data = await api("/api/scan", payload);
+    // 扫完顺手把复核表读出来：单脸记录与三卡片都基于这次扫描。
+    await loadReview();
+    return data;
+  }
   catch(e){
     toast((payload && payload.demo ? "加载演示失败：" : "扫描失败：") + e.message);
     return null;
@@ -471,383 +650,155 @@ async function runScan(payload, label){
   finally{ setScanBusy(false); }
 }
 
-// ---------------------------------------------------------------- 3.3.0 语义找图
-function semQuery(){ return (document.getElementById("input-search").value || "").trim(); }
-function semBand(){
-  const v = Number(document.getElementById("sem-band").value);
-  return SEM_BANDS[Math.max(0, Math.min(2, isNaN(v) ? 1 : v))];
-}
-function semSetNotice(text){
-  const el = document.getElementById("sem-notice");
-  if(el) el.textContent = text || "";
-}
-async function semFetchStatus(){
-  const src = currentSourceDir();
-  const qs = src ? ("?source_dir=" + encodeURIComponent(src)) : "";
-  try{
-    const [status, settings] = await Promise.all([
-      api("/api/semantic/status" + qs), api("/api/settings")
-    ]);
-    sem.status = status; sem.settings = settings;
-    if(status.progress) sem.progress = status.progress;
-    renderSemPanel();
-    if(status.progress && status.progress.running) semStartPoll();
-  }catch(e){
-    const el = document.getElementById("sem-status");
-    if(el) el.textContent = "语义索引状态读取失败：" + e.message;
+// ---------------------------------------------------------------- 页签导航
+function showTab(id, noScroll){
+  currentTab = id;
+  document.querySelectorAll(".view").forEach(v => v.classList.remove("on"));
+  const v = document.getElementById("view-" + id);
+  if(v) v.classList.add("on");
+  document.querySelectorAll("nav.tabs a[data-tab]").forEach(a => a.classList.toggle("on", a.dataset.tab === id));
+  if(id === "sem"){
+    sem.mode = "semantic"; syncSeg("semantic");
+    document.getElementById("input-search").placeholder = "描述画面，例如：海边日落 / 桌上的食物";
+    semFetchStatus();
+    if(semQuery()) semSearchNow(); else renderSemResults();
+  } else if(sem.mode === "semantic"){
+    sem.mode = "keyword"; syncSeg("keyword");
+    document.getElementById("input-search").placeholder = "搜索文件名 / 人名 / 描述…";
   }
+  if(!noScroll) window.scrollTo({top:0, behavior:"smooth"});
 }
-function semCoverage(){
-  const c = (sem.status && sem.status.coverage) || { total: 0, indexed: 0 };
-  return c;
-}
-function renderSemPanel(){
-  const statusEl = document.getElementById("sem-status");
-  const textEl = document.getElementById("sem-progress-text");
-  const bar = document.querySelector("#sem-progress > span");
-  const btn = document.getElementById("btn-index");
-  const pauseBtn = document.getElementById("btn-index-pause");
-  const cancelBtn = document.getElementById("btn-index-cancel");
-  if(!statusEl) return;
-  const st = sem.status || {};
-  const model = st.model || {};
-  const p = sem.progress || {};
-  const cov = semCoverage();
-  const running = !!p.running;
-  const downloading = running && p.phase === "download";
-  let pct = 0, text = "";
-  if(running){
-    if(downloading){
-      pct = p.download_total ? (p.downloaded / p.download_total * 100) : 0;
-      text = "下载模型 " + fmtBytes(p.downloaded || 0) + " / " + fmtBytes(p.download_total || 0);
-      statusEl.textContent = p.message || "正在下载语义模型……";
-    } else {
-      pct = p.total ? (p.done / p.total * 100) : 0;
-      text = "建立索引 " + (p.done || 0) + " / " + (p.total || 0);
-      statusEl.textContent = p.message || "正在建立索引……";
-    }
-  } else {
-    pct = cov.total ? (cov.indexed / cov.total * 100) : 0;
-    text = cov.total ? ("当前文件夹 " + cov.indexed + " / " + cov.total + " 已建索引")
-                     : "先扫描一个文件夹";
-    if(!model.present){
-      statusEl.textContent = "本机还没有语义模型（首次建立索引时下载，约 190 MB，只需一次）";
-    } else if(p.paused){
-      statusEl.textContent = p.message || "索引已暂停";
-    } else if(p.error){
-      statusEl.textContent = "出错了：" + p.error;
-    } else if(st.index && st.index.incompatible){
-      statusEl.textContent = st.index.incompatible_reason || "索引需要重建";
-    } else {
-      const total = (st.index && st.index.count) || 0;
-      statusEl.innerHTML = '索引共 <strong>' + total + '</strong> 条向量 · '
-        + esc(text) + (cov.total ? '（按文件内容去重）' : '');
-    }
-  }
-  if(bar) bar.style.width = Math.max(0, Math.min(100, pct)).toFixed(1) + "%";
-  const progressWrap = document.getElementById("sem-progress");
-  if(progressWrap){
-    progressWrap.style.display = (running || (cov.total && cov.indexed < cov.total)
-      || p.paused) ? "" : "none";
-  }
-  if(textEl) textEl.textContent = running ? text : "";
-  const complete = !!(model.present && cov.total && cov.indexed >= cov.total
-    && !(st.index && st.index.incompatible));
-  if(btn){
-    btn.textContent = !model.present ? "下载模型并建立索引"
-      : (running ? "建立中…" : (complete ? "语义索引已就绪"
-        : (p.paused ? "继续建立索引" : "建立语义索引")));
-    btn.disabled = running || complete;
-  }
-  if(pauseBtn){
-    pauseBtn.style.display = (running && !downloading) ? "" : "none";
-    pauseBtn.textContent = "暂停";
-  }
-  if(cancelBtn) cancelBtn.style.display = running ? "" : "none";
-  const band = semBand();
-  document.getElementById("sem-band-label").innerHTML = "<strong>" + esc(band.label) + "</strong>";
-  document.getElementById("sem-band-hint").textContent = band.hint + "（映射自实测余弦）";
-  const apiState = document.getElementById("sem-api-state");
-  if(apiState){
-    const s = sem.settings || {};
-    if(s.has_key) apiState.textContent = "已配置 Key · " + s.masked_key + " · " + (s.key_storage || "");
-    else apiState.textContent = "未配置 Key（勾选精排会自动退回本地结果）";
-  }
-}
-async function semBuild(){
-  if(!cur()){ toast("先加载演示图或扫描一个文件夹"); return; }
-  const btn = document.getElementById("btn-index");
-  if(btn){ btn.disabled = true; btn.classList.add("loading"); }
-  try{
-    sem.progress = await api("/api/index/build",
-      { source_dir: currentSourceDir(), resume: true });
-    renderSemPanel();
-    semStartPoll();
-  }catch(e){
-    toast("建立索引失败：" + e.message);
-    sem.progress = { running: false, error: e.message };
-    renderSemPanel();
-  }finally{
-    if(btn){ btn.classList.remove("loading"); btn.disabled = false; }
-    renderSemPanel();
-  }
-}
-function semStartPoll(){
-  if(sem.pollTimer) return;
-  sem.pollTimer = setInterval(semPoll, 800);
-}
-async function semPoll(){
-  try{
-    const p = await api("/api/index_progress");
-    sem.progress = p;
-    if(p.running){ renderSemPanel(); return; }
-    clearInterval(sem.pollTimer); sem.pollTimer = null;
-    await semFetchStatus();
-    if(sem.mode === "semantic" && semQuery()) semSearchNow();
-  }catch(e){
-    clearInterval(sem.pollTimer); sem.pollTimer = null;
-  }
-}
-async function semPause(){
-  try{
-    sem.progress = await api("/api/index/pause", {});
-    renderSemPanel();
-  }catch(e){ toast("暂停失败：" + e.message); }
-}
-async function semCancel(){
-  try{
-    sem.progress = await api("/api/index/cancel", {});
-    semStartPoll();
-    toast("正在取消：已经算好的向量会保存");
-  }catch(e){ toast("取消失败：" + e.message); }
-}
-function semScheduleSearch(){
-  if(sem.mode !== "semantic") return;
-  clearTimeout(sem.timer);
-  sem.timer = setTimeout(semSearchNow, 450);
-}
-async function semSearchNow(){
-  const q = semQuery();
-  const box = document.getElementById("sem-results");
-  if(!box) return;
-  if(!q){
-    sem.results = null;
-    box.innerHTML = '<div class="empty">输入一句描述开始找图，例如「海边」「桌上的食物」「夜晚的城市」。</div>';
-    semSetNotice(""); return;
-  }
-  if(!cur()){
-    box.innerHTML = '<div class="empty">先加载演示图或扫描一个文件夹。</div>';
-    return;
-  }
-  const seq = ++sem.seq;
-  box.innerHTML = '<div class="empty">正在本地检索……</div>';
-  semSetNotice("");
-  try{
-    const out = await api("/api/semantic/search", {
-      query: q, band: semBand().key,
-      use_api: document.getElementById("sem-use-api").checked,
-      source_dir: currentSourceDir()
-    });
-    if(seq !== sem.seq) return;
-    if(!out.ok){
-      sem.results = null;
-      box.innerHTML = '<div class="empty">' + esc(out.error || "搜索失败") + '</div>';
-      if(out.need_index) semSetNotice("当前文件夹的图片还没建索引：点上方的“建立语义索引”。");
-      return;
-    }
-    sem.results = out;
-    renderSemResults();
-    const apiMeta = out.api || {};
-    if(apiMeta.notice){
-      semSetNotice(apiMeta.notice + (apiMeta.error ? "（" + apiMeta.error + "）" : ""));
-      if(apiMeta.error) toast("API 精排不可用，已退回本地结果：" + apiMeta.error);
-    } else if(apiMeta.used){
-      semSetNotice("API 精排已生效：本次只上传了 2 张 200×200 拼图（含前 20 张候选），"
-        + (apiMeta.matched || []).length + " 张被确认相关。");
-    }
-  }catch(e){
-    if(seq === sem.seq) box.innerHTML = '<div class="empty">搜索失败：' + esc(e.message) + '</div>';
-  }
-}
-function renderSemResults(){
-  const box = document.getElementById("sem-results");
-  const out = sem.results;
-  if(!box) return;
-  if(!out){ box.innerHTML = ""; return; }
-  const list = out.results || [];
-  if(!list.length){
-    box.innerHTML = '<div class="empty">没有达到「' + esc(out.band_label) + '」的结果，试试把置信度调到“宽松”。</div>';
-    return;
-  }
-  const apiConfirmed = list.some(r => r.api_matched);
-  const cards = list.map(r => {
-    const im = byId(r.id);
-    if(!im) return "";
-    const face = faceLabelOf(im.id);
-    const confLabel = (r.api_matched && r.score < out.threshold) ? "API 确认" : out.band_label;
-    return '<div class="photo" data-semopen="' + esc(im.id) + '">' +
-      '<img src="' + thumbUrl(im) + '" alt="' + esc(im.filename) + '" loading="lazy">' +
-      '<div class="meta"><div class="name">' + esc(im.filename) + '</div>' +
-      '<div class="small">相关度 ' + r.score + ' · ' + esc(confLabel) +
-      (r.api_matched ? ' · <span class="tag">API 精排</span>' : '') + '</div>' +
-      '<div class="small">' + fmtDate(im.exif_time) + (face ? ' · ' + esc(face) : '') + '</div></div></div>';
-  }).join("");
-  box.innerHTML = '<div class="sem-row" style="margin-top:24px;"><span class="sem-label">「' +
-    esc(out.query) + '」命中 <strong>' + list.length + '</strong> 张 · 置信度 ' +
-    esc(out.band_label) + '（≥ ' + out.threshold + ' 分）' +
-    (apiConfirmed ? ' · 含 API 精排确认' : '') + '</span></div>' +
-    '<div class="result-grid">' + cards + '</div>';
-  box.querySelectorAll("[data-semopen]").forEach(n =>
-    n.addEventListener("click", () => openModal(n.dataset.semopen)));
+function syncSeg(mode){
+  document.querySelectorAll("#search-mode button").forEach(b => b.classList.toggle("on", b.dataset.smode === mode));
 }
 function setSearchMode(mode){
   sem.mode = mode;
-  document.querySelectorAll("#search-mode button").forEach(b =>
-    b.classList.toggle("active", b.dataset.smode === mode));
-  const panel = document.getElementById("semantic-panel");
-  const gallery = document.getElementById("gallery-card");
-  const semantic = mode === "semantic";
-  if(panel) panel.style.display = semantic ? "" : "none";
-  if(gallery) gallery.style.display = semantic ? "none" : "";
-  document.getElementById("input-search").placeholder = semantic
-    ? "描述画面，例如：海边日落 / 桌上的食物"
-    : "搜索：文件名 / 人名 / 拍摄日期 / 一句画面描述";
-  if(semantic){
-    semFetchStatus();
-    if(semQuery()) semSearchNow();
-    else renderSemResults();
+  syncSeg(mode);
+  if(mode === "semantic"){
+    document.getElementById("input-search").placeholder = "描述画面，例如：海边日落 / 桌上的食物";
+    showTab("sem");
+  } else {
+    document.getElementById("input-search").placeholder = "搜索文件名 / 人名 / 描述…";
+    showTab("all");
   }
 }
-function afterDataChange(){
-  if(sem.mode === "semantic"){
-    semFetchStatus().then(() => { if(semQuery()) semSearchNow(); });
-  }
+function toggleMore(open){
+  const m = document.getElementById("more-menu");
+  if(!m) return;
+  if(open === undefined) m.classList.toggle("open");
+  else m.classList.toggle("open", !!open);
 }
-function closeModal(){ document.getElementById("modal-root").innerHTML = ""; }
-function openPrivacyModal(){
-  const root = document.getElementById("modal-root");
-  const provider = (sem.settings && (sem.settings.providers || []).find(
-    p => p.id === sem.settings.provider)) || { label: "所选厂商" };
-  root.innerHTML = '<div class="modal-bg" id="modal-bg"><div class="modal" style="max-width:560px;">' +
-    '<h3 style="margin:0 0 12px;">API 精排的隐私说明</h3>' +
-    '<p style="color:#737373;font-size:13px;line-height:1.8;margin:0 0 12px;">' +
-    '只有在你自己勾选“本次启用 API 精排”的那一次搜索里，拾影才会把：<br>' +
-    '① 本地粗筛出的前 20 张候选照片的 <strong>200×200 低清缩略图</strong>（拼成 2 张带序号的黑底图）；<br>' +
-    '② 你输入的搜索词；<br>' +
-    '通过 HTTPS 发送给 <strong>' + esc(provider.label) + '</strong> 做相关性排序。<br>' +
-    '不会上传原图、不会上传完整路径、不会上传人脸分组或拍摄时间，也不会在后台自动发送。' +
-    '不勾选时完全离线；请求超时 9 秒或失败会自动退回本地结果。</p>' +
-    '<p style="color:#737373;font-size:12px;line-height:1.7;margin:0 0 16px;">' +
-    'API Key 用 Windows DPAPI 加密保存（绑定当前 Windows 账户），界面与日志只显示掩码。</p>' +
-    '<button class="primary" id="btn-privacy-ok">我已知晓并开启</button> ' +
-    '<button id="btn-privacy-cancel">取消（仅用本地搜索）</button></div></div>';
-  document.getElementById("btn-privacy-cancel").addEventListener("click", () => {
-    document.getElementById("sem-use-api").checked = false;
-    closeModal();
-  });
-  document.getElementById("btn-privacy-ok").addEventListener("click", async () => {
-    try{
-      sem.settings = await api("/api/semantic/privacy_ack", {});
-      document.getElementById("sem-use-api").checked = true;
-      closeModal();
-      toast("已开启：只在本次勾选时精排");
-      if(semQuery()) semSearchNow();
-    }catch(e){ toast("记录隐私确认失败：" + e.message); }
-  });
-}
-function openApiSettings(){
-  const s = sem.settings || {};
-  const providers = s.providers || [];
-  const root = document.getElementById("modal-root");
-  const opts = providers.map(p =>
-    '<option value="' + esc(p.id) + '"' + (p.id === s.provider ? " selected" : "") + '>' +
-    esc(p.label) + '</option>').join("");
-  const custom = s.provider === "custom";
-  root.innerHTML = '<div class="modal-bg" id="modal-bg"><div class="modal" style="max-width:560px;">' +
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
-    '<h3 style="margin:0;">API 精排设置</h3><button id="btn-api-close" class="small">关闭</button></div>' +
-    '<p style="color:#737373;font-size:12px;line-height:1.7;margin:0 0 18px;">' +
-    '默认关闭，只有每次手动勾选才调用。请求走 OpenAI 兼容的 /chat/completions，超时 9 秒，失败自动退回本地。</p>' +
-    '<div class="field"><label>厂商</label><select id="api-provider">' + opts + '</select></div>' +
-    '<div class="field" id="api-custom-base" style="display:' + (custom ? "block" : "none") + ';">' +
-    '<label>base_url（到 /v1 为止）</label><input type="text" id="api-base" value="' + esc(s.custom_base_url || "") + '" placeholder="https://example.com/v1"></div>' +
-    '<div class="field" id="api-custom-model" style="display:' + (custom ? "block" : "none") + ';">' +
-    '<label>模型名</label><input type="text" id="api-model" value="' + esc(s.custom_model || "") + '" placeholder="your-vision-model"></div>' +
-    '<div class="field"><label>API Key（' + esc(s.key_storage || "") + '）</label>' +
-    '<input type="password" id="api-key" autocomplete="off" placeholder="' +
-    (s.has_key ? "已保存 " + esc(s.masked_key) + "，留空表示不修改" : "粘贴你的 API Key") + '"></div>' +
-    '<p style="color:#737373;font-size:12px;line-height:1.7;margin:0 0 16px;" id="api-endpoint-note"></p>' +
-    '<button class="primary" id="btn-api-save">保存设置</button> ' +
-    '<button id="btn-api-clear">清除 Key</button></div></div>';
-  function syncProvider(){
-    const id = document.getElementById("api-provider").value;
-    const isCustom = id === "custom";
-    document.getElementById("api-custom-base").style.display = isCustom ? "block" : "none";
-    document.getElementById("api-custom-model").style.display = isCustom ? "block" : "none";
-    const p = providers.find(x => x.id === id) || {};
-    document.getElementById("api-endpoint-note").textContent = isCustom
-      ? "自定义接口必须兼容 OpenAI 的 /chat/completions，并能接收 data:image/jpeg;base64 图片。"
-      : ("默认地址：" + (p.base_url || "") + " · 模型：" + (p.model || "") + "。" + (p.note || ""));
-  }
-  document.getElementById("api-provider").addEventListener("change", syncProvider);
-  syncProvider();
-  document.getElementById("btn-api-close").addEventListener("click", closeModal);
-  document.getElementById("btn-api-clear").addEventListener("click", async () => {
-    try{
-      sem.settings = await api("/api/settings", { clear_key: true });
-      toast("已清除 API Key");
-      closeModal(); renderSemPanel();
-    }catch(e){ toast("清除失败：" + e.message); }
-  });
-  document.getElementById("btn-api-save").addEventListener("click", async () => {
-    const provider = document.getElementById("api-provider").value;
-    const payload = { provider: provider };
-    if(provider === "custom"){
-      payload.base_url = document.getElementById("api-base").value.trim();
-      payload.model = document.getElementById("api-model").value.trim();
-      if(!payload.base_url || !payload.model){
-        toast("自定义接口需要同时填写 base_url 与模型名"); return;
+async function pickAndScan(){
+  if(scanBusy){ toast("正在扫描中，请稍候"); return; }
+  const b = document.getElementById("btn-pick-scan");
+  const label = b.textContent;
+  b.disabled = true; b.textContent = "等待选择…";
+  try{
+    const res = await api("/api/pick_folder");
+    if(res.ok && res.path){
+      document.getElementById("input-path").value = res.path;
+      const data = await runScan({ path: res.path }, "扫描中…");
+      if(data){
+        state.custom = data; state.mode = "custom";
+        toast("扫描完成：共 " + data.stats.total + " 张");
+        resetPaging(); renderAll(); afterDataChange();
       }
+    } else {
+      toast((res.reason || "当前环境无图形界面") + "：请在「更多 ▾」里手动输入路径后扫描");
+      toggleMore(true);
     }
-    const key = document.getElementById("api-key").value.trim();
-    if(key) payload.api_key = key;
-    try{
-      sem.settings = await api("/api/settings", payload);
-      toast(key ? "设置已保存，Key 已加密保存" : "设置已保存");
-      closeModal(); renderSemPanel();
-    }catch(e){ toast("保存失败：" + e.message); }
-  });
+  }catch(e){
+    toast("选择文件夹失败：" + e.message + "；可在「更多 ▾」里手动输入路径");
+    toggleMore(true);
+  }
+  finally{ b.disabled = false; b.textContent = label; }
 }
 
+// ---------------------------------------------------------------- 动态计数
+function tabCount(id){
+  const d = cur();
+  if(!d) return 0;
+  const s = d.stats || {};
+  if(id === "all") return s.total || 0;
+  if(id === "dedup") return (d.recommendations || []).length;
+  if(id === "people"){
+    const c = review.data && review.data.counts;
+    if(c) return (c.suggested + c.doubtful + c.unmatched);
+    return (d.face_groups || []).length;
+  }
+  if(id === "basket") return basket.filter(e => !e.legacy && sameDir(e.source_dir, currentSourceDir())).length;
+  return 0;
+}
+function updateNav(){
+  for(const id of ["all","dedup","people","basket"]){
+    const el = document.getElementById("cnt-" + id);
+    if(el) el.textContent = tabCount(id);
+  }
+}
+function updatePillCounts(){
+  const d = cur();
+  const vals = { all:0, dated:0, burst:0, screenshot:0, no_exif:0 };
+  if(d){
+    const s = d.stats || {};
+    vals.all = s.total || 0;
+    vals.dated = s.dated || 0;
+    vals.burst = (d.burst_groups || []).reduce((n,g) => n + g.length, 0);
+    vals.screenshot = s.screenshots || 0;
+    vals.no_exif = s.no_exif || 0;
+  }
+  document.querySelectorAll("#pills [data-cnt]").forEach(el => {
+    el.textContent = vals[el.dataset.cnt] != null ? vals[el.dataset.cnt] : 0;
+  });
+}
+function updateSourceLabel(){
+  const el = document.getElementById("source-label");
+  if(!el) return;
+  const d = cur();
+  if(!d){ el.textContent = "当前：未加载数据"; return; }
+  const n = d.stats ? d.stats.total : 0;
+  el.textContent = state.mode === "demo"
+    ? ("当前：演示数据（" + n + " 张合成图）")
+    : ("当前：" + folderName(d.source_dir) + "（" + n + " 张）");
+}
+
+// ---------------------------------------------------------------- 3.4.0 体检条
+function renderStats(){
+  const d = cur();
+  const bar = document.getElementById("stats");
+  const hero = document.getElementById("hero-empty");
+  if(!d || !d.stats || !d.stats.total){
+    if(bar) bar.style.display = "none";
+    if(hero) hero.style.display = "";
+    return;
+  }
+  if(bar) bar.style.display = "";
+  if(hero) hero.style.display = "none";
+  const s = d.stats;
+  const groups = (d.recommendations || []).length;
+  const exact = s.exact_groups || 0;
+  const similar = s.similar_groups || 0;
+  const burst = s.burst_groups || 0;
+  const people = (review.data && review.data.counts) ? review.data.counts.persons : (d.face_groups || []).length;
+  const pending = (review.data && review.data.counts) ? review.data.counts.pending : 0;
+  bar.innerHTML = '<span>共 <strong>' + s.total + '</strong> 张照片</span>' +
+    '<span>发现 <strong>' + groups + '</strong> 组待处理（精确重复 ' + exact + ' 组 · 疑似重复 ' + similar +
+    ' 组 · 连拍保护 ' + burst + ' 组 · 可省 ' + fmtBytes(s.reclaimable_bytes) +
+    '）<a onclick="showTab(\'dedup\');return false">去清理 →</a></span>' +
+    '<span>已确认 <strong>' + people + '</strong> 人 · 待复核 <strong>' + pending +
+    '</strong> 张脸 <a onclick="showTab(\'people\');return false">去复核 →</a></span>';
+}
+
+// ---------------------------------------------------------------- 3.4.0 人脸横幅
 function renderFaceBanner(){
   const d = cur(); const el = document.getElementById("face-banner");
   if(!d){ el.innerHTML = ""; return; }
   const method = d.face_method;
-  if(method === "embedding_dbscan"){
-    el.innerHTML = '<section class="card"><p style="margin:0;">人脸：真实人脸特征向量聚类（特征向量 + DBSCAN），非 Haar 检测冒充。</p></section>';
-  } else if(method === "test_grouping"){
-    el.innerHTML = '<section class="card"><p style="margin:0;">人脸：当前为测试分组（非真实人脸识别），真实人脸聚类待真机环境验证。Haar 只能检测不能认人，未用于身份分组。</p></section>';
-  } else {
-    el.innerHTML = '<section class="card"><p style="margin:0;">人脸：当前无分组。特征向量聚类不可用，且无测试分组。Haar 只能检测不能认人，未用于身份分组。</p></section>';
-  }
-}
-function renderStats(){
-  const d = cur(); const el = document.getElementById("stats");
-  if(!d){ el.innerHTML = ""; return; }
-  const s = d.stats;
-  const cards = [
-    ["照片总数", s.total],
-    ["精确重复组", s.exact_groups + " 组 · 多 " + s.exact_extra_copies + " 张"],
-    ["疑似重复组", s.similar_groups + " 组"],
-    ["连拍保护组", s.burst_groups + " 组"],
-    ["手机截图", s.screenshots + " 张"],
-    ["无拍摄时间", s.no_exif + " 张"],
-    ["带拍摄时间", s.dated + " 张"],
-    ["待删可释放", fmtBytes(s.reclaimable_bytes)],
-  ];
-  el.innerHTML = cards.map(c =>
-    '<div class="stat"><div class="num">' + esc(c[1]) + '</div><div class="lbl">' + esc(c[0]) + '</div></div>'
-  ).join("");
+  const txt = method === "embedding_dbscan"
+    ? "人脸：真实人脸特征向量聚类（特征向量 + DBSCAN），非 Haar 检测冒充。"
+    : method === "test_grouping"
+    ? "人脸分组为测试分组：演示图里的人脸是同一批测试图的不同裁剪，仅用于验证分组流程，不是真实人物识别结果。正式使用请以真实照片为准。"
+    : "人脸：当前无分组。特征向量聚类不可用，且无测试分组。Haar 只能检测不能认人，未用于身份分组。";
+  el.innerHTML = '<div class="banner">' + txt + '</div>';
 }
 function galleryItems(){
   const d = cur(); if(!d) return [];
@@ -868,15 +819,20 @@ function galleryItems(){
 function renderGallery(){
   const el = document.getElementById("gallery");
   const d = cur();
-  if(!d){ el.innerHTML = '<div class="empty">还没有数据：点“加载演示图”，或输入文件夹路径后点“扫描这个文件夹”。</div>'; return; }
+  if(!d){
+    el.innerHTML = '<div class="empty"><h3>还没有照片</h3><p>点顶部「选择文件夹并扫描」，或在「更多 ▾」里加载演示图。</p>' +
+      '<button onclick="pickAndScan()">选择文件夹并扫描</button></div>';
+    return;
+  }
   const list = galleryItems();
-  if(!list.length){ el.innerHTML = '<div class="empty">这个筛选下没有照片。试试换个胶囊或清空搜索。</div>'; return; }
-  // v3.2.0 分批渲染：只渲染前 galleryLimit 张，点“加载更多”再往后翻，
-  // 几千张也不会一次建几千个 DOM 节点。图片走动态缩略图接口 + lazy。
+  if(!list.length){
+    el.innerHTML = '<div class="empty">这个筛选下没有照片。<button onclick="resetFilter()">清除筛选</button></div>';
+    return;
+  }
   const visible = list.slice(0, state.galleryLimit);
   const groups = {};
   for(const im of visible){
-    const key = im.exif_time ? im.exif_time.slice(0, 10) : "无拍摄时间";
+    const key = im.exif_time ? (im.exif_time.slice(0,4) + "年" + im.exif_time.slice(5,7) + "月") : "无拍摄时间";
     (groups[key] = groups[key] || []).push(im);
   }
   const keys = Object.keys(groups).sort((a, b) => (a === "无拍摄时间" ? 1 : b === "无拍摄时间" ? -1 : b.localeCompare(a)));
@@ -886,18 +842,26 @@ function renderGallery(){
       return '<div class="photo" data-open="' + esc(im.id) + '">' +
         '<img src="' + thumbUrl(im) + '" alt="' + esc(im.filename) + '" loading="lazy">' +
         '<div class="meta"><div class="name">' + esc(im.filename) + '</div>' +
-        '<div class="small">' + fmtDate(im.exif_time) + ' · ' + im.width + '×' + im.height + ' · ' + fmtBytes(im.size_bytes) + '</div>' +
-        '<div style="margin-top:6px;"><span class="' + tagClass(im.source_tag) + '">' + tagLabel(im.source_tag) + '</span>' +
-        (face ? '<span class="tag">' + esc(face) + '</span>' : '') + '</div></div></div>';
+        '<div class="small">' + fmtDate(im.exif_time) + ' · ' + im.width + '×' + im.height + ' · ' + fmtBytes(im.size_bytes) +
+        (face ? ' · ' + esc(face) : '') + '</div></div></div>';
     }).join("");
-    return '<div class="timeline"><h3>' + esc(k) + '（' + groups[k].length + ' 张）</h3><div class="grid">' + cards + '</div></div>';
+    return '<section class="timeline"><h3 class="section-title">' + esc(k) + ' · ' + groups[k].length + ' 张</h3>' +
+      '<div class="grid">' + cards + '</div></section>';
   }).join("");
   if(list.length > state.galleryLimit){
-    html += '<div style="text-align:center;margin-top:16px;"><button class="primary" data-loadmore-gallery>加载更多（还剩 ' + (list.length - state.galleryLimit) + ' 张）</button></div>';
+    html += '<div class="loadmore"><button data-loadmore-gallery>加载更多（还剩 ' +
+      (list.length - state.galleryLimit) + ' 张）</button></div>';
   }
   el.innerHTML = html;
-  el.querySelectorAll("[data-loadmore-gallery]").forEach(b => b.addEventListener("click", () => { state.galleryLimit += GALLERY_BATCH; renderGallery(); }));
+  el.querySelectorAll("[data-loadmore-gallery]").forEach(b => b.addEventListener("click", () => {
+    state.galleryLimit += GALLERY_BATCH; renderGallery();
+  }));
   el.querySelectorAll("[data-open]").forEach(n => n.addEventListener("click", () => openModal(n.dataset.open)));
+}
+function resetFilter(){
+  state.filter = "all"; state.search = "";
+  document.getElementById("input-search").value = "";
+  resetPaging(); renderAll();
 }
 function pairNoteFor(keepId, discId){
   const d = cur(); if(!d) return null;
@@ -917,14 +881,13 @@ function photoMini(im){
 function renderPK(){
   const d = cur(); const el = document.getElementById("pk");
   const burstsEl = document.getElementById("bursts");
-  if(!d){ el.innerHTML = '<div class="empty">还没有数据。</div>'; burstsEl.innerHTML = ""; return; }
-  // v3.2.0 分批渲染：PK 组与连拍组每批只渲染 GROUP_BATCH 组，点
-  // “加载更多”再往后翻；图片走动态缩略图接口 + lazy。
+  const burstsTitle = document.getElementById("bursts-title");
+  if(!d){ el.innerHTML = '<div class="empty">还没有数据。</div>'; burstsEl.innerHTML = ""; if(burstsTitle) burstsTitle.textContent = "连拍保护组"; return; }
   const recsAll = (d.recommendations || []).filter(r => r.discard && r.discard.length);
   const recs = recsAll.slice(0, state.pkLimit);
   if(!recsAll.length){ el.innerHTML = '<div class="empty">没有发现重复，干净！</div>'; }
   else {
-    let pkHtml = recs.map((r, ri) => {
+    let pkHtml = recs.map(r => {
       const keep = byId(r.keep);
       const discs = r.discard.map(dd => {
         const id = typeof dd === "string" ? dd : dd.id;
@@ -932,77 +895,117 @@ function renderPK(){
         const p = pairNoteFor(r.keep, id);
         const inBasket = basketHas(id);
         return '<div class="discard">' + photoMini(byId(id)) +
-          '<div style="margin-top:8px;font-size:13px;color:#737373;">' +
+          '<div class="discard-note">' +
           (sim != null ? '与保留项相似度 ' + sim + '% · ' : 'SHA-256 完全相同 · ') +
           (p && p.color_variant ? '<span class="color-badge">色彩变体（黑白/滤镜）</span>' : '') + '</div>' +
-          '<button class="small" style="margin-top:8px;" data-basket="' + esc(id) + '"' + (inBasket ? ' disabled' : '') + '>' +
+          '<button class="small" data-basket="' + esc(id) + '"' + (inBasket ? ' disabled' : '') + '>' +
           (inBasket ? '已在待删篓' : '移入待删篓') + '</button></div>';
       }).join("");
-      return '<div class="pk"><div class="pk-head"><strong>' +
-        (r.group_type === "exact" ? "精确重复" : "疑似重复") + '</strong>' +
-        '<span style="color:#737373;font-size:13px;">' + esc(r.reason) + '</span></div>' +
-        '<div class="vs"><div><span class="keep-badge">推荐保留</span>' + photoMini(keep) + '</div>' +
-        '<div class="vs-mid">VS</div><div>' + discs + '</div></div></div>';
+      return '<div class="pkcard"><div class="reason">' +
+        (r.group_type === "exact" ? "精确重复" : "疑似重复") + ' · ' + esc(r.reason) + '</div>' +
+        '<div class="pk"><div class="pk-side"><span class="keep-badge">推荐保留</span>' + photoMini(keep) + '</div>' +
+        '<div class="vs">VS</div><div class="pk-side">' + discs + '</div></div></div>';
     }).join("");
     if(recsAll.length > state.pkLimit){
-      pkHtml += '<div style="text-align:center;margin-top:16px;"><button class="primary" data-loadmore-pk>加载更多（还剩 ' + (recsAll.length - state.pkLimit) + ' 组）</button></div>';
+      pkHtml += '<div class="loadmore"><button data-loadmore-pk>加载更多（还剩 ' +
+        (recsAll.length - state.pkLimit) + ' 组）</button></div>';
     }
     el.innerHTML = pkHtml;
     el.querySelectorAll("[data-basket]").forEach(b => b.addEventListener("click", () => {
       addBasket(b.dataset.basket); saveLocal(); toast("已移入待删篓（还没删）"); renderAll();
     }));
-    el.querySelectorAll("[data-loadmore-pk]").forEach(b => b.addEventListener("click", () => { state.pkLimit += GROUP_BATCH; renderPK(); }));
+    el.querySelectorAll("[data-loadmore-pk]").forEach(b => b.addEventListener("click", () => {
+      state.pkLimit += GROUP_BATCH; renderPK();
+    }));
   }
   const burstsAll = d.burst_groups || [];
   const bursts = burstsAll.slice(0, state.burstLimit);
+  if(burstsTitle) burstsTitle.textContent = "连拍保护组 · " + burstsAll.length + " 组已保护，不参与淘汰";
   if(!burstsAll.length){ burstsEl.innerHTML = '<div class="empty">没有连拍组。</div>'; }
   else {
     let bHtml = bursts.map(g => {
       const cards = g.map(id => '<div class="photo">' + photoMini(byId(id)) + '</div>').join("");
-      return '<div style="margin-bottom:16px;"><strong>连拍组（' + g.length + ' 张 · 已保护）</strong><div class="grid" style="margin-top:10px;">' + cards + '</div></div>';
+      return '<div style="margin-bottom:16px;"><strong>连拍组（' + g.length + ' 张 · 已保护）</strong>' +
+        '<div class="grid" style="margin-top:10px;">' + cards + '</div></div>';
     }).join("");
     if(burstsAll.length > state.burstLimit){
-      bHtml += '<div style="text-align:center;margin-top:16px;"><button class="primary" data-loadmore-burst>加载更多（还剩 ' + (burstsAll.length - state.burstLimit) + ' 组）</button></div>';
+      bHtml += '<div class="loadmore"><button data-loadmore-burst>加载更多（还剩 ' +
+        (burstsAll.length - state.burstLimit) + ' 组）</button></div>';
     }
     burstsEl.innerHTML = bHtml;
-    burstsEl.querySelectorAll("[data-loadmore-burst]").forEach(b => b.addEventListener("click", () => { state.burstLimit += GROUP_BATCH; renderPK(); }));
+    burstsEl.querySelectorAll("[data-loadmore-burst]").forEach(b => b.addEventListener("click", () => {
+      state.burstLimit += GROUP_BATCH; renderPK();
+    }));
   }
 }
 function renderFaces(){
-  const d = cur(); const el = document.getElementById("faces");
-  if(!d){ el.innerHTML = ""; return; }
-  const groups = d.face_groups || [];
-  if(!groups.length){ el.innerHTML = '<div class="empty">当前没有人物分组（原因见顶部横幅）。</div>'; return; }
-  el.innerHTML = groups.map(g => {
-    const first = byId(g.members[0]);
-    const thumbs = g.members.slice(0, 4).map(id => {
-      const im = byId(id);
-      return im ? '<img src="' + thumbUrl(im) + '" alt="" loading="lazy" style="width:52px;height:52px;object-fit:cover;border-radius:12px;">' : '';
-    }).join("");
-    return '<div class="face"><img class="avatar" src="' + (first ? thumbUrl(first) : "") + '" alt="">' +
-      '<div style="flex:1;"><div><strong>' + esc(names[g.id] || g.label) + '</strong>' +
-      ' <span style="color:#737373;font-size:12px;">' + (g.method === "test_grouping" ? "测试分组（非真实人脸识别）" : "特征向量聚类") + '</span></div>' +
-      '<div style="color:#737373;font-size:13px;margin:4px 0;">' + g.members.length + ' 张：' + esc(g.members.join("、")) + '</div>' +
-      '<div style="display:flex;gap:8px;align-items:center;">' + thumbs + '</div></div>' +
-      '<div><input type="text" value="' + esc(names[g.id] || g.label) + '" data-rename="' + esc(g.id) + '" placeholder="输入名字，如：妈妈">' +
-      '<button class="small" data-rename-btn="' + esc(g.id) + '">保存名字</button></div></div>';
-  }).join("");
-  el.querySelectorAll("[data-rename-btn]").forEach(b => b.addEventListener("click", () => {
-    const gid = b.dataset.renameBtn;
-    const input = el.querySelector('[data-rename="' + gid + '"]');
-    const v = (input.value || "").trim();
-    if(v){ names[gid] = v; } else { delete names[gid]; }
-    saveLocal(); toast("名字已保存在本机浏览器里"); renderAll();
+  const el = document.getElementById("faces");
+  if(!el) return;
+  const d = review.data;
+  const persons = (d && d.persons) || [];
+  let html = "";
+  if(!persons.length){
+    html = '<div class="empty" style="padding:32px 12px;">' +
+      '<h3 style="font-size:16px;">还没有已确认人物</h3>' +
+      '<p>去「待复核面孔」里采纳一条建议、把脸分给某人，或新建一个人物；' +
+      '拍板之后这张脸就固定记在本机数据文件里，重扫也不会丢。</p>' +
+      (d && d.counts && d.counts.pending
+        ? '<button class="small" id="btn-goto-review">去复核这 ' + d.counts.pending + ' 张脸 →</button>'
+        : '<span class="note">当前没有待复核的脸。</span>') + '</div>';
+  } else {
+    html = persons.map(p => '<div class="person">' +
+      (p.avatar_key
+        ? '<img class="avatar" src="' + revCropUrl(p.avatar_key, 112) + '" alt="" loading="lazy">'
+        : '<div class="avatar"></div>') +
+      '<div style="flex:1;"><div><strong>' + esc(p.name || ("人物 " + p.id.slice(2))) + '</strong>' +
+      ' <span class="note">' + (p.source === "auto" ? "自动簇确认后生成" : "手动新建") + '</span></div>' +
+      '<div class="note" style="margin:4px 0;">' + p.face_count + ' 张脸 · ' + p.photo_count + ' 张照片</div>' +
+      '<div><input type="text" value="' + esc(p.name || "") + '" data-rename="' + esc(p.id) +
+      '" placeholder="输入名字，如：妈妈" aria-label="改名"></div></div>' +
+      '<div><button class="small" data-rename-btn="' + esc(p.id) + '">保存名字</button></div></div>').join("");
+  }
+  const clusters = (d && d.clusters) || [];
+  if(clusters.length){
+    html += '<details style="margin-top:18px;"><summary>自动簇 ' + clusters.length +
+      ' 组（未确认，仅作聚类参考）</summary>' +
+      '<p class="note" style="margin:8px 0 0;">自动簇只是“长得像”的分组，人工拍板后才会变成人物。' +
+      '簇 id 用锚点脸的哈希前缀（例如 af_1a2b3c4d-0），不再用「人物 1/2/3」顺序编号。</p>' +
+      '<p class="note" style="margin:4px 0 0;">' +
+      clusters.map(c => esc(c.cluster_id) + '（' + (c.size || 0) + ' 张脸）').join(" · ") +
+      '</p></details>';
+  }
+  el.innerHTML = html;
+  const goto = document.getElementById("btn-goto-review");
+  if(goto) goto.addEventListener("click", () => {
+    showPeopleSub("review");
+    const pill = document.querySelector('#people-subtabs [data-sub="review"]');
+    if(pill) pill.click();
+  });
+  el.querySelectorAll("[data-rename-btn]").forEach(b => b.addEventListener("click", async () => {
+    const pid = b.dataset.renameBtn;
+    const input = el.querySelector('[data-rename="' + pid + '"]');
+    const v = input ? (input.value || "").trim() : "";
+    b.disabled = true;
+    try{
+      const payload = await revPost("/api/review/names", { person_id: pid, name: v });
+      revApply(payload);
+      toast(v ? "名字已存到本机数据文件：" + v : "名字已清空（记录留空，不删人物）");
+    }catch(e){ toast("保存名字失败：" + e.message); }
+    finally{ b.disabled = false; }
   }));
 }
 function renderBasket(){
   const el = document.getElementById("basket");
   const box = document.getElementById("confirm-box");
   box.style.display = "none"; box.innerHTML = "";
-  if(!basket.length){ el.innerHTML = '<div class="empty">篓子是空的。去 PK 台把淘汰候选移进来。</div>'; return; }
+  if(!basket.length){
+    el.innerHTML = '<div class="empty"><h3>待删确认篓是空的</h3>' +
+      '<p>当你在去重台确认删除照片后，它们会先出现在这里。<br>二次确认后才删除，删除走系统回收站。</p>' +
+      '<button onclick="showTab(\'dedup\');return false">去去重清理 →</button></div>';
+    return;
+  }
   const d = cur();
   const curDir = currentSourceDir();
-  // 只有“属于当前扫描文件夹、且是 3.2.0 之后的新格式”的条目才允许删。
   const deletable = basket.filter(e => !e.legacy && sameDir(e.source_dir, curDir));
   let html = "";
   for(const e of basket){
@@ -1081,13 +1084,519 @@ function renderRules(){
     "推荐规则：" + (d.recommendation_rule || "") + "\n" +
     "疑似重复范围：" + (d.similar_scope_note || "") + "\n" +
     "人脸：" + (d.face_note || "") + "\n" +
+    "复核表：" + (d.face_review_note || "") + "\n" +
     "缩略图：" + (d.thumbnail_note || "");
 }
+// ---------------------------------------------------------------- 3.4.0 复核表
+let REV_PAGE = 6;                    // 每卡片每页行数（懒加载分页；自测会临时改小验证分页）
+const REV_BUCKETS = [
+  { key: "suggested", title: "建议", hint: "与某人相似度 ≥ 0.60" },
+  { key: "doubtful", title: "可疑", hint: "0.40–0.60，或前两名太接近（差 < 0.06）" },
+  { key: "unmatched", title: "未匹配", hint: "最高相似度 < 0.40" }
+];
+let review = { data: null, sel: new Set(), page: { suggested: 1, doubtful: 1, unmatched: 1 },
+  loading: false, error: "", bust: 0 };
+let revObserver = null;
+
+function revCropUrl(key, size){
+  return "/api/review/crop?k=" + encodeURIComponent(key) + "&size=" + (size || 168);
+}
+function revRows(bucket){
+  const d = review.data;
+  return (d && d.cards && d.cards[bucket]) ? d.cards[bucket] : [];
+}
+function revRow(key){
+  for(const b of ["suggested", "doubtful", "unmatched"]){
+    for(const r of revRows(b)) if(r.key === key) return r;
+  }
+  return null;
+}
+function revPersonName(id){
+  const d = review.data;
+  if(d) for(const p of (d.persons || [])){
+    if(p.id === id) return p.name || ("人物 " + id.slice(2));
+  }
+  return id || "";
+}
+function revScore(v){ return (v == null) ? "—" : Number(v).toFixed(2); }
+function revTargetLabel(c){
+  if(!c) return "";
+  return c.kind === "person" ? revPersonName(c.target_id) : c.label;
+}
+async function revPost(path, body){
+  const r = await fetch(path, { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}) });
+  let j = null;
+  try{ j = await r.json(); }catch(e){ j = { error: "返回不是合法 JSON" }; }
+  if(!r.ok || (j && j.error)){
+    const err = new Error((j && j.error) || ("请求失败：" + r.status));
+    err.payload = j; err.status = r.status; throw err;
+  }
+  return j;
+}
+function revApply(payload){
+  if(payload && payload.cards){ review.data = payload; review.error = ""; review.sel.clear(); }
+  renderReview();
+  renderFaces(); renderStats(); updateNav();
+}
+async function loadReview(){
+  review.loading = true;
+  try{
+    const d = await api("/api/review/list");
+    review.data = d; review.error = "";
+  }catch(e){
+    review.error = "读取复核表失败：" + e.message;
+  }finally{
+    review.loading = false;
+  }
+  renderReview(); renderFaces(); renderStats();
+}
+function syncReviewCount(){
+  const c = review.data && review.data.counts;
+  const el = document.getElementById("review-count-label");
+  if(el) el.textContent = "(" + (c ? (c.suggested + c.doubtful + c.unmatched) : 0) + ")";
+  const pc = document.getElementById("people-count-label");
+  if(pc) pc.textContent = "(" + (c ? c.persons : 0) + ")";
+}
+function renderReview(){
+  const note = document.getElementById("rev-note");
+  const d = review.data;
+  if(note){
+    if(review.error) note.textContent = review.error;
+    else if(!d) note.textContent = "复核表还没读出来：先扫描一个文件夹，再点「刷新复核表」。";
+    else note.innerHTML = esc(d.note || "") + (d.extra_note ? "<br>" + esc(d.extra_note) : "");
+  }
+  renderReviewCards();
+  renderRevBatchBar();
+  renderRevHistory();
+  syncReviewCount();
+  revLazyImages();
+}
+function revRowHtml(r){
+  const best = r.best, alt = r.second;
+  const checked = review.sel.has(r.key) ? " checked" : "";
+  let sug = "";
+  if(best){
+    sug += '<div class="who">' + esc(revTargetLabel(best)) +
+      '<span class="score">' + revScore(best.score) + '</span></div>';
+    if(alt){
+      sug += '<div class="alt">次选：' + esc(revTargetLabel(alt)) + ' · ' + revScore(alt.score) + '</div>';
+    } else if(r.bucket === "unmatched"){
+      sug += '<div class="alt">最高也只有 ' + revScore(best.score) + '，未到可疑线</div>';
+    }
+  } else {
+    sug = '<div class="alt">还没有可比对的人物或簇</div>';
+  }
+  if(r.dup_photos > 1){
+    sug += '<div class="alt">同内容照片 ' + r.dup_photos + ' 张，共享同一张脸，只复核一次</div>';
+  }
+  return '<div class="revrow' + (checked ? " sel" : "") + '" data-rev-row="' + esc(r.key) + '">' +
+    '<input type="checkbox" class="revchk" data-rev-chk="' + esc(r.key) + '"' + checked + '>' +
+    '<img class="revcrop" alt="裁剪小图" title="点开全图，可在全图里直接分配" ' +
+      'data-rev-img="' + esc(r.key) + '" data-src="' + revCropUrl(r.key, 168) + '" loading="lazy">' +
+    '<div class="revmeta"><div class="rname">' + esc(r.filename) + '</div>' +
+      '<div class="rsub">' + esc(fmtDate(r.exif_time)) + ' · ' + esc(r.index_label) +
+      ' · 检测分 ' + (r.det_score != null ? Number(r.det_score).toFixed(2) : "—") + '</div></div>' +
+    '<div class="revsug">' + sug + '</div>' +
+    '<div class="revactions">' +
+      '<button data-rev-do="adopt" data-key="' + esc(r.key) + '"' + (best ? "" : " disabled") + '>采纳建议</button>' +
+      '<button data-rev-do="assign" data-key="' + esc(r.key) + '">分到其他人</button>' +
+      '<button data-rev-do="new_person" data-key="' + esc(r.key) + '">新建人物</button>' +
+      '<button data-rev-do="ignore" data-key="' + esc(r.key) + '">忽略这张脸</button>' +
+    '</div></div>';
+}
+function renderReviewCards(){
+  const box = document.getElementById("rev-cards");
+  if(!box) return;
+  if(!review.data){
+    box.innerHTML = '<div class="revempty">复核表还没读出来。</div>';
+    return;
+  }
+  box.innerHTML = REV_BUCKETS.map(b => {
+    const rows = revRows(b.key);
+    const shown = rows.slice(0, (review.page[b.key] || 1) * REV_PAGE);
+    const canAdopt = b.key === "suggested" && rows.length > 0;
+    let body;
+    if(!rows.length){
+      body = '<div class="revempty">' +
+        (b.key === "suggested" ? "这一档暂时没有待复核的脸。"
+          : b.key === "doubtful" ? "没有需要你二次确认的模糊脸。"
+          : "没有与任何人物都对不上的脸。") + '</div>';
+    } else {
+      body = shown.map(revRowHtml).join("");
+      if(rows.length > shown.length){
+        body += '<div class="loadmore"><button class="small" data-rev-more="' + b.key +
+          '">加载更多（还剩 ' + (rows.length - shown.length) + ' 张）</button></div>';
+      }
+    }
+    return '<section class="revcard" data-bucket="' + b.key + '"><header>' +
+      '<strong>' + b.title + '</strong><span class="c">' + b.hint + '</span>' +
+      '<span class="c">' + rows.length + ' 张</span><span class="sp"></span>' +
+      '<label><input type="checkbox" class="revchk" data-rev-all="' + b.key + '">全选本页</label>' +
+      '<button class="small" data-rev-adopt-page="' + b.key + '"' +
+        (canAdopt ? "" : ' disabled title="这一档没有明确建议，不能一键采纳"') +
+        '>一键采纳本页建议</button></header>' +
+      '<div class="revrows">' + body + '</div></section>';
+  }).join("");
+  revLazyImages();
+}
+function revLazyImages(){
+  const imgs = document.querySelectorAll("#rev-cards img.revcrop[data-src]");
+  if(!imgs.length) return;
+  if(!("IntersectionObserver" in window)){
+    imgs.forEach(im => { im.src = im.dataset.src; delete im.dataset.src; });
+    return;
+  }
+  if(!revObserver){
+    revObserver = new IntersectionObserver(entries => {
+      for(const e of entries){
+        if(!e.isIntersecting) continue;
+        const im = e.target;
+        if(im.dataset.src){ im.src = im.dataset.src; delete im.dataset.src; }
+        revObserver.unobserve(im);
+      }
+    }, { rootMargin: "160px 0px" });
+  }
+  imgs.forEach(im => revObserver.observe(im));
+}
+function renderRevBatchBar(){
+  const el = document.getElementById("rev-batchbar");
+  if(!el) return;
+  const n = review.sel.size;
+  // 吸顶要落在 #rev-batchbar 自身上：若套一层内部 div，sticky 元素的
+  // 包含块只有那一行高，根本没有可吸附的滚动距离。
+  el.className = n ? "batchbar" : "";
+  if(!n){ el.innerHTML = ""; return; }
+  el.innerHTML = '<span class="n">已选 ' + n + ' 张脸</span>' +
+    '<button class="small" data-rev-batch="adopt">批量采纳建议</button>' +
+    '<button class="small" data-rev-batch="assign">批量分到某人</button>' +
+    '<button class="small" data-rev-batch="ignore">批量忽略</button>' +
+    '<span style="flex:1;"></span>' +
+    '<button class="small" data-rev-batch="clear">清空选择</button>';
+}
+function renderRevHistory(){
+  const el = document.getElementById("rev-history");
+  if(!el) return;
+  const h = (review.data && review.data.history) || [];
+  if(!h.length){
+    el.innerHTML = '<div class="revempty">还没有复核操作记录。采纳、分人、新建、忽略都会在这里留一条，可随时撤销。</div>';
+    return;
+  }
+  el.innerHTML = h.map(t => '<div class="revhist-item' + (t.undone ? " done" : "") + '">' +
+    '<span>' + esc(t.title) + (t.action && t.action.indexOf("batch") === 0 ? "" : "") + '</span>' +
+    (t.undone ? '<span class="tagmini">已撤销</span>' : '') +
+    '<span class="t">' + esc(fmtDate(t.at)) + '</span>' +
+    '<button class="small" data-rev-undo="' + esc(t.txn_id) + '"' + (t.undone ? " disabled" : "") +
+    '>撤销</button></div>').join("");
+}
+
+// ---- 操作
+async function revDo(action, keys, opts){
+  opts = opts || {};
+  if(!keys.length){ toast("没有选中任何脸"); return null; }
+  try{
+    const payload = await revPost("/api/review/act",
+      { action: action, keys: keys, person_id: opts.person_id, name: opts.name });
+    revApply(payload);
+    const t = payload.txn;
+    let msg = t && t.title ? t.title : "已完成";
+    if(payload.unresolved && payload.unresolved.length){
+      msg += "；" + payload.unresolved.length + " 张脸没有可用建议，已留在复核表";
+    }
+    toast(msg + "（可撤销）");
+    return payload;
+  }catch(e){
+    toast("操作失败：" + e.message);
+    return null;
+  }
+}
+function openRevPersonPicker(keys){
+  const root = document.getElementById("modal-root");
+  const persons = (review.data && review.data.persons) || [];
+  const list = persons.length
+    ? persons.map(p => '<button data-pick-person="' + esc(p.id) + '">' +
+        esc(p.name || ("人物 " + p.id.slice(2))) +
+        ' <span style="color:#737373;font-size:12px;">' + p.face_count + ' 张已确认脸</span></button>').join("")
+    : '<div class="note" style="margin:0;">还没有已确认人物：可以先用下面的输入框新建一个。</div>';
+  root.innerHTML = '<div class="modal-bg" id="rev-pick-bg"><div class="modal" style="max-width:520px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+    '<strong>把 ' + keys.length + ' 张脸分给谁？</strong>' +
+    '<button id="rev-pick-close">关闭</button></div>' +
+    '<div class="revpicker" id="rev-picker">' + list + '</div>' +
+    '<div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">' +
+    '<input id="rev-new-name" type="text" placeholder="或输入新名字，直接建人物" ' +
+    'style="flex:1;min-width:180px;border:1px solid var(--line);border-radius:8px;padding:0 10px;height:34px;background:var(--bg);color:var(--ink);">' +
+    '<button class="small" id="rev-new-create">新建并分入</button></div>' +
+    '<p class="note" style="margin:14px 0 0;">只是给这张脸定归属，不会移动或删除任何照片。</p></div></div>';
+  const close = () => { root.innerHTML = ""; };
+  document.getElementById("rev-pick-close").addEventListener("click", close);
+  document.getElementById("rev-pick-bg").addEventListener("click", e => {
+    if(e.target.id === "rev-pick-bg") close();
+  });
+  root.querySelectorAll("[data-pick-person]").forEach(b => b.addEventListener("click", async () => {
+    const pid = b.dataset.pickPerson;
+    close();
+    await revDo("assign", keys, { person_id: pid });
+  }));
+  const create = async () => {
+    const nm = (document.getElementById("rev-new-name").value || "").trim();
+    if(!nm){ toast("先给新人物起个名字"); return; }
+    close();
+    await revDo("new_person", keys, { name: nm });
+  };
+  document.getElementById("rev-new-create").addEventListener("click", create);
+  document.getElementById("rev-new-name").addEventListener("keydown", e => {
+    if(e.key === "Enter") create();
+  });
+}
+function openRevNewPerson(keys){
+  const root = document.getElementById("modal-root");
+  root.innerHTML = '<div class="modal-bg" id="rev-new-bg"><div class="modal" style="max-width:480px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+    '<strong>新建人物，并把 ' + keys.length + ' 张脸分进去</strong>' +
+    '<button id="rev-newp-close">关闭</button></div>' +
+    '<div class="field" style="margin-top:16px;"><label>人物名字</label>' +
+    '<input id="rev-newp-name" type="text" placeholder="例如：妈妈 / 同事小王" value=""></div>' +
+    '<button class="primary" id="rev-newp-ok">建立并分入</button>' +
+    '<p class="note" style="margin:14px 0 0;">新人物用持久短标识保存（p_xxxxxxxx），撤销这条操作时若名下已无脸且没改过名，才会清理掉这个空人物。</p>' +
+    '</div></div>';
+  const close = () => { root.innerHTML = ""; };
+  document.getElementById("rev-newp-close").addEventListener("click", close);
+  document.getElementById("rev-new-bg").addEventListener("click", e => {
+    if(e.target.id === "rev-new-bg") close();
+  });
+  const ok = async () => {
+    const nm = (document.getElementById("rev-newp-name").value || "").trim();
+    if(!nm){ toast("先给新人物起个名字"); return; }
+    close();
+    await revDo("new_person", keys, { name: nm });
+  };
+  document.getElementById("rev-newp-ok").addEventListener("click", ok);
+  document.getElementById("rev-newp-name").addEventListener("keydown", e => {
+    if(e.key === "Enter") ok();
+  });
+  setTimeout(() => { const i = document.getElementById("rev-newp-name"); if(i) i.focus(); }, 30);
+}
+function openFaceFull(key){
+  const r = revRow(key);
+  if(!r) return;
+  const im = byId(r.image_id);
+  const W = r.image_w || (im ? im.width : 0);
+  const H = r.image_h || (im ? im.height : 0);
+  const root = document.getElementById("modal-root");
+  let overlay = "";
+  if(r.box && W && H){
+    const x = Math.max(0, r.box[0] / W * 100);
+    const y = Math.max(0, r.box[1] / H * 100);
+    const w = Math.min(100 - x, r.box[2] / W * 100);
+    const h = Math.min(100 - y, r.box[3] / H * 100);
+    overlay = '<div class="facebox" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) +
+      '%;width:' + w.toFixed(3) + '%;height:' + h.toFixed(3) + '%;"></div>';
+  }
+  root.innerHTML = '<div class="modal-bg" id="rev-full-bg"><div class="modal">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">' +
+    '<strong>' + esc(r.filename) + '</strong><button id="rev-full-close">关闭</button></div>' +
+    '<div class="note" style="margin:6px 0 0;">' + esc(fmtDate(r.exif_time)) + ' · ' + esc(r.index_label) +
+    ' · 建议：' + esc(revTargetLabel(r.best)) + ' ' + revScore(r.best && r.best.score) +
+    (r.second ? ' · 次选 ' + esc(revTargetLabel(r.second)) + ' ' + revScore(r.second.score) : '') + '</div>' +
+    '<div class="fullbox"><img src="/api/file?rel=' + encodeURIComponent(r.relative_path) +
+      '" alt="' + esc(r.filename) + '">' + overlay + '</div>' +
+    '<div class="revactions" style="justify-content:flex-start;margin-top:16px;">' +
+      '<button data-rev-do="adopt" data-key="' + esc(key) + '"' + (r.best ? "" : " disabled") + '>采纳建议</button>' +
+      '<button data-rev-do="assign" data-key="' + esc(key) + '">分到其他人</button>' +
+      '<button data-rev-do="new_person" data-key="' + esc(key) + '">新建人物</button>' +
+      '<button data-rev-do="ignore" data-key="' + esc(key) + '">忽略这张脸</button>' +
+    '</div>' +
+    '<p class="note" style="margin:12px 0 0;">在全图里直接分配即可，不用回列表；复核只改这张脸的归属，绝不删照片。</p>' +
+    '</div></div>';
+  const close = () => { root.innerHTML = ""; };
+  document.getElementById("rev-full-close").addEventListener("click", close);
+  document.getElementById("rev-full-bg").addEventListener("click", e => {
+    if(e.target.id === "rev-full-bg") close();
+  });
+}
+async function revUndo(txnId, keys, force){
+  try{
+    const payload = await revPost("/api/review/undo",
+      { txn_id: txnId, keys: keys || null, force: !!force });
+    revApply(payload);
+    const u = payload.undo || {};
+    toast("已撤销：" + (u.restored || 0) + " 张脸回到操作前的状态" +
+      (u.removed_persons && u.removed_persons.length
+        ? "，清理空人物 " + u.removed_persons.length + " 个" : ""));
+  }catch(e){
+    const p = e.payload || {};
+    if(e.status === 409 && p.conflicts && p.conflicts.length){
+      openUndoConflict(txnId, p);
+    } else {
+      toast("撤销失败：" + e.message);
+    }
+  }
+}
+function openUndoConflict(txnId, payload){
+  const hist = (review.data && review.data.history) || [];
+  const txn = hist.filter(t => t.txn_id === txnId)[0] || { keys: [] };
+  const conflictKeys = (payload.conflicts || []).map(c => c.key).filter(Boolean);
+  const safeKeys = (txn.keys || []).filter(k => conflictKeys.indexOf(k) < 0);
+  const root = document.getElementById("modal-root");
+  root.innerHTML = '<div class="modal-bg" id="rev-conf-bg"><div class="modal" style="max-width:600px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+    '<strong>这条记录里有 ' + conflictKeys.length + ' 张脸之后又被改过</strong>' +
+    '<button id="rev-conf-close">关闭</button></div>' +
+    '<p class="note" style="margin:10px 0;">为避免静默覆盖，先请你确认怎么处理：' +
+    '可以只撤销没被改过的部分，也可以强行整条撤销（会覆盖后来的改动）。</p>' +
+    '<div class="revhist" style="margin-top:0;">' +
+    (payload.conflicts || []).map(c => '<div class="revhist-item"><span>' + esc(c.key) + '</span>' +
+      '<span class="t">' + esc(c.reason || "") + (c.latest_txn ? "（最新记录 " + esc(c.latest_txn) + "）" : "") +
+      '</span></div>').join("") + '</div>' +
+    '<div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">' +
+    (safeKeys.length ? '<button class="primary" id="rev-conf-safe">只撤销未冲突的 ' + safeKeys.length + ' 张</button>' : '') +
+    '<button class="danger" id="rev-conf-force">整条强行撤销（' + (txn.count || 0) + ' 项）</button>' +
+    '<button id="rev-conf-cancel">取消</button></div></div></div>';
+  const close = () => { root.innerHTML = ""; };
+  document.getElementById("rev-conf-close").addEventListener("click", close);
+  document.getElementById("rev-conf-cancel").addEventListener("click", close);
+  document.getElementById("rev-conf-bg").addEventListener("click", e => {
+    if(e.target.id === "rev-conf-bg") close();
+  });
+  const safe = document.getElementById("rev-conf-safe");
+  if(safe) safe.addEventListener("click", () => { close(); revUndo(txnId, safeKeys, false); });
+  document.getElementById("rev-conf-force").addEventListener("click", () => { close(); revUndo(txnId, null, true); });
+}
+
+// ---- 复核区事件（用委托，卡片重绘后依然生效）
+(function bindReviewEvents(){
+  const wrap = document.getElementById("people-review");
+  if(!wrap) return;
+  wrap.addEventListener("change", e => {
+    const chk = e.target.closest("[data-rev-chk]");
+    if(chk){
+      const key = chk.dataset.revChk;
+      if(chk.checked) review.sel.add(key); else review.sel.delete(key);
+      const row = wrap.querySelector('[data-rev-row="' + key + '"]');
+      if(row) row.classList.toggle("sel", chk.checked);
+      renderRevBatchBar();
+      return;
+    }
+    const all = e.target.closest("[data-rev-all]");
+    if(all){
+      const bucket = all.dataset.revAll;
+      const rows = revRows(bucket).slice(0, (review.page[bucket] || 1) * REV_PAGE);
+      for(const r of rows){
+        if(all.checked) review.sel.add(r.key); else review.sel.delete(r.key);
+      }
+      // 就地改勾选状态，不重绘整张卡片：DOM 稳定，操作也更跟手。
+      wrap.querySelectorAll('.revcard[data-bucket="' + bucket + '"] [data-rev-chk]')
+        .forEach(chk => {
+          const on = review.sel.has(chk.dataset.revChk);
+          chk.checked = on;
+          const row = chk.closest(".revrow");
+          if(row) row.classList.toggle("sel", on);
+        });
+      renderRevBatchBar();
+    }
+  });
+  wrap.addEventListener("click", async e => {
+    const img = e.target.closest("img.revcrop[data-rev-img]");
+    if(img){ openFaceFull(img.dataset.revImg); return; }
+    const more = e.target.closest("[data-rev-more]");
+    if(more){
+      const b = more.dataset.revMore;
+      review.page[b] = (review.page[b] || 1) + 1;
+      renderReviewCards();
+      return;
+    }
+    const adoptPage = e.target.closest("[data-rev-adopt-page]");
+    if(adoptPage){
+      const bucket = adoptPage.dataset.revAdoptPage;
+      const rows = revRows(bucket).slice(0, (review.page[bucket] || 1) * REV_PAGE);
+      const keys = rows.filter(r => r.best).map(r => r.key);
+      if(!keys.length){ toast("这一档没有明确建议的行"); return; }
+      adoptPage.disabled = true;
+      await revDo("adopt", keys);
+      return;
+    }
+    const batch = e.target.closest("[data-rev-batch]");
+    if(batch){
+      const act = batch.dataset.revBatch;
+      const keys = Array.from(review.sel);
+      if(act === "clear"){ review.sel.clear(); renderReviewCards(); renderRevBatchBar(); return; }
+      if(act === "assign"){ openRevPersonPicker(keys); return; }
+      await revDo(act, keys);
+      return;
+    }
+    const undoBtn = e.target.closest("[data-rev-undo]");
+    if(undoBtn){ await revUndo(undoBtn.dataset.revUndo, null, false); return; }
+    const doBtn = e.target.closest("[data-rev-do]");
+    if(doBtn){
+      const key = doBtn.dataset.key;
+      const act = doBtn.dataset.revDo;
+      if(act === "assign"){ openRevPersonPicker([key]); return; }
+      if(act === "new_person"){ openRevNewPerson([key]); return; }
+      const root = document.getElementById("modal-root");
+      if(root && root.innerHTML) root.innerHTML = "";
+      await revDo(act, [key]);
+    }
+  });
+  wrap.addEventListener("error", e => {
+    const img = e.target;
+    if(img && img.classList && img.classList.contains("revcrop")){
+      img.style.visibility = "hidden";
+    }
+  }, true);
+  const refresh = document.getElementById("rev-refresh");
+  if(refresh) refresh.addEventListener("click", loadReview);
+  const toggle = document.getElementById("rev-toggle-history");
+  if(toggle) toggle.addEventListener("click", () => {
+    const box = document.getElementById("rev-history-wrap");
+    if(!box) return;
+    box.style.display = box.style.display === "none" ? "" : "none";
+    if(box.style.display !== "none") renderRevHistory();
+  });
+})();
+
+// ---- 旧人名一次性迁移（localStorage -> 本机数据文件）
+async function migrateLegacyNames(){
+  let raw = null;
+  try{ raw = localStorage.getItem(LS_NAMES); }catch(e){ return; }
+  if(!raw) return;
+  let obj = {};
+  try{ obj = JSON.parse(raw) || {}; }catch(e){ obj = {}; }
+  const clean = {};
+  for(const k of Object.keys(obj)){
+    if(typeof obj[k] === "string" && obj[k] && obj[k].indexOf("data:") !== 0) clean[k] = obj[k];
+  }
+  if(!Object.keys(clean).length){
+    try{ localStorage.removeItem(LS_NAMES); }catch(e){}
+    return;
+  }
+  try{
+    const payload = await revPost("/api/review/migrate_names", { names: clean });
+    const r = payload.migration_result || {};
+    review.data = payload;
+    try{
+      localStorage.setItem(LS_NAMES + ".backup", raw);
+      localStorage.removeItem(LS_NAMES);
+    }catch(e){}
+    toast("旧人名已迁移到本机数据文件（" + (r.migrated || 0) + " 条" +
+      (r.applied && r.applied.length ? "，套用 " + r.applied.length + " 条" : "") +
+      (r.conflicts && r.conflicts.length ? "，冲突 " + r.conflicts.length + " 条以本机命名为准" : "") + "）");
+  }catch(e){
+    toast("旧人名迁移失败：" + e.message + "（旧名仍留在浏览器里，没有丢）");
+  }
+}
+
 function renderAll(){
   renderFaceBanner(); renderStats(); renderGallery(); renderPK(); renderFaces(); renderBasket(); renderRules();
-  document.getElementById("tab-demo").classList.toggle("active", state.mode === "demo");
-  document.getElementById("tab-custom").classList.toggle("active", state.mode === "custom");
+  updateNav(); updatePillCounts(); updateSourceLabel();
+  const demo = state.mode === "demo";
+  document.getElementById("tab-demo").classList.toggle("on", demo);
+  document.getElementById("tab-custom").classList.toggle("on", !demo);
   document.querySelectorAll("#pills .pill").forEach(p => p.classList.toggle("active", p.dataset.filter === state.filter));
+  const pc = document.getElementById("people-count-label");
+  if(pc) pc.textContent = "(" + ((review.data && review.data.counts) ? review.data.counts.persons : 0) + ")";
+  renderReview();
 }
 function openModal(id){
   const im = byId(id); if(!im) return;
@@ -1102,13 +1611,347 @@ function openModal(id){
   document.getElementById("modal-close").addEventListener("click", () => root.innerHTML = "");
   document.getElementById("modal-bg").addEventListener("click", e => { if(e.target.id === "modal-bg") root.innerHTML = ""; });
 }
+function closeModal(){ document.getElementById("modal-root").innerHTML = ""; }
+
+// ---------------------------------------------------------------- 3.4.0 语义找图
+function semQuery(){ return (document.getElementById("input-search").value || "").trim(); }
+function semBand(){
+  const v = Number(document.getElementById("sem-band").value);
+  return SEM_BANDS[Math.max(0, Math.min(2, isNaN(v) ? 1 : v))];
+}
+function semSetNotice(text){
+  const el = document.getElementById("sem-notice");
+  if(el) el.textContent = text || "";
+}
+async function semFetchStatus(){
+  const src = currentSourceDir();
+  const qs = src ? ("?source_dir=" + encodeURIComponent(src)) : "";
+  try{
+    const [status, settings] = await Promise.all([
+      api("/api/semantic/status" + qs), api("/api/settings")
+    ]);
+    sem.status = status; sem.settings = settings;
+    if(status.progress) sem.progress = status.progress;
+    renderSemPanel();
+    if(status.progress && status.progress.running) semStartPoll();
+  }catch(e){
+    const el = document.getElementById("sem-status");
+    if(el) el.textContent = "语义索引状态读取失败：" + e.message;
+  }
+}
+function semCoverage(){
+  const c = (sem.status && sem.status.coverage) || { total: 0, indexed: 0 };
+  return c;
+}
+function renderSemPanel(){
+  const statusEl = document.getElementById("sem-status");
+  const textEl = document.getElementById("sem-progress-text");
+  const bar = document.querySelector("#sem-progress > span");
+  const btn = document.getElementById("btn-index");
+  const pauseBtn = document.getElementById("btn-index-pause");
+  const cancelBtn = document.getElementById("btn-index-cancel");
+  if(!statusEl) return;
+  const st = sem.status || {};
+  const model = st.model || {};
+  const p = sem.progress || {};
+  const cov = semCoverage();
+  const running = !!p.running;
+  const downloading = running && p.phase === "download";
+  let pct = 0, text = "";
+  if(running){
+    if(downloading){
+      pct = p.download_total ? (p.downloaded / p.download_total * 100) : 0;
+      text = "下载模型 " + fmtBytes(p.downloaded || 0) + " / " + fmtBytes(p.download_total || 0);
+      statusEl.textContent = p.message || "正在下载语义模型……";
+    } else {
+      pct = p.total ? (p.done / p.total * 100) : 0;
+      text = "建立索引 " + (p.done || 0) + " / " + (p.total || 0);
+      statusEl.textContent = p.message || "正在建立索引……";
+    }
+  } else {
+    pct = cov.total ? (cov.indexed / cov.total * 100) : 0;
+    text = cov.total ? ("当前文件夹 " + cov.indexed + " / " + cov.total + " 已建索引") : "先扫描一个文件夹";
+    if(!model.present){
+      statusEl.textContent = "本机还没有语义模型（首次建立索引时下载，约 190 MB，只需一次）";
+    } else if(p.paused){
+      statusEl.textContent = p.message || "索引已暂停";
+    } else if(p.error){
+      statusEl.textContent = "出错了：" + p.error;
+    } else if(st.index && st.index.incompatible){
+      statusEl.textContent = st.index.incompatible_reason || "索引需要重建";
+    } else {
+      const total = (st.index && st.index.count) || 0;
+      statusEl.innerHTML = '索引共 <strong>' + total + '</strong> 条向量 · ' + esc(text) +
+        (cov.total ? '（按文件内容去重）' : '');
+    }
+  }
+  if(bar) bar.style.width = Math.max(0, Math.min(100, pct)).toFixed(1) + "%";
+  const progressWrap = document.getElementById("sem-progress");
+  if(progressWrap){
+    progressWrap.style.display = (running || (cov.total && cov.indexed < cov.total) || p.paused) ? "" : "none";
+  }
+  if(textEl) textEl.textContent = running ? text : "";
+  const complete = !!(model.present && cov.total && cov.indexed >= cov.total && !(st.index && st.index.incompatible));
+  if(btn){
+    btn.textContent = !model.present ? "下载模型并建立索引"
+      : (running ? "建立中…" : (complete ? "语义索引已就绪" : (p.paused ? "继续建立索引" : "建立语义索引")));
+    btn.disabled = running || complete;
+  }
+  if(pauseBtn){
+    pauseBtn.style.display = (running && !downloading) ? "" : "none";
+    pauseBtn.textContent = "暂停";
+  }
+  if(cancelBtn) cancelBtn.style.display = running ? "" : "none";
+  const band = semBand();
+  document.getElementById("sem-band-label").innerHTML = "<strong>" + esc(band.label) + "</strong>";
+  document.getElementById("sem-band-hint").textContent = band.hint + "（映射自实测余弦）";
+  const apiState = document.getElementById("sem-api-state");
+  if(apiState){
+    const s = sem.settings || {};
+    if(s.has_key) apiState.textContent = "已配置 Key · " + s.masked_key + " · " + (s.key_storage || "");
+    else apiState.textContent = "未配置 Key（勾选精排会自动退回本地结果）";
+  }
+}
+async function semBuild(){
+  if(!cur()){ toast("先加载演示图或扫描一个文件夹"); return; }
+  const btn = document.getElementById("btn-index");
+  if(btn){ btn.disabled = true; btn.classList.add("loading"); }
+  try{
+    sem.progress = await api("/api/index/build", { source_dir: currentSourceDir(), resume: true });
+    renderSemPanel(); semStartPoll();
+  }catch(e){
+    toast("建立索引失败：" + e.message);
+    sem.progress = { running: false, error: e.message };
+    renderSemPanel();
+  }finally{
+    if(btn){ btn.classList.remove("loading"); btn.disabled = false; }
+    renderSemPanel();
+  }
+}
+function semStartPoll(){
+  if(sem.pollTimer) return;
+  sem.pollTimer = setInterval(semPoll, 800);
+}
+async function semPoll(){
+  try{
+    const p = await api("/api/index_progress");
+    sem.progress = p;
+    if(p.running){ renderSemPanel(); return; }
+    clearInterval(sem.pollTimer); sem.pollTimer = null;
+    await semFetchStatus();
+    if(sem.mode === "semantic" && semQuery()) semSearchNow();
+  }catch(e){
+    clearInterval(sem.pollTimer); sem.pollTimer = null;
+  }
+}
+async function semPause(){
+  try{ sem.progress = await api("/api/index/pause", {}); renderSemPanel(); }
+  catch(e){ toast("暂停失败：" + e.message); }
+}
+async function semCancel(){
+  try{
+    sem.progress = await api("/api/index/cancel", {});
+    semStartPoll(); toast("正在取消：已经算好的向量会保存");
+  }catch(e){ toast("取消失败：" + e.message); }
+}
+function semScheduleSearch(){
+  if(sem.mode !== "semantic") return;
+  clearTimeout(sem.timer);
+  sem.timer = setTimeout(semSearchNow, 450);
+}
+async function semSearchNow(){
+  const q = semQuery();
+  const box = document.getElementById("sem-results");
+  if(!box) return;
+  if(!q){
+    sem.results = null;
+    box.innerHTML = '<div class="empty">输入一句描述开始找图，例如「海边」「桌上的食物」「夜晚的城市」。</div>';
+    semSetNotice(""); return;
+  }
+  if(!cur()){ box.innerHTML = '<div class="empty">先加载演示图或扫描一个文件夹。</div>'; return; }
+  const seq = ++sem.seq;
+  box.innerHTML = '<div class="empty">正在本地检索……</div>';
+  semSetNotice("");
+  try{
+    const out = await api("/api/semantic/search", {
+      query: q, band: semBand().key,
+      use_api: document.getElementById("sem-use-api").checked,
+      source_dir: currentSourceDir()
+    });
+    if(seq !== sem.seq) return;
+    if(!out.ok){
+      sem.results = null;
+      box.innerHTML = '<div class="empty">' + esc(out.error || "搜索失败") + '</div>';
+      if(out.need_index) semSetNotice("当前文件夹的图片还没建索引：点上方的「建立语义索引」。");
+      return;
+    }
+    sem.results = out; renderSemResults();
+    const apiMeta = out.api || {};
+    if(apiMeta.notice){
+      semSetNotice(apiMeta.notice + (apiMeta.error ? "（" + apiMeta.error + "）" : ""));
+      if(apiMeta.error) toast("API 精排不可用，已退回本地结果：" + apiMeta.error);
+    } else if(apiMeta.used){
+      semSetNotice("API 精排已生效：本次只上传了 2 张 200×200 拼图（含前 20 张候选），" +
+        (apiMeta.matched || []).length + " 张被确认相关。");
+    }
+  }catch(e){
+    if(seq === sem.seq) box.innerHTML = '<div class="empty">搜索失败：' + esc(e.message) + '</div>';
+  }
+}
+function renderSemResults(){
+  const box = document.getElementById("sem-results");
+  const out = sem.results;
+  if(!box) return;
+  if(!out){ box.innerHTML = ""; return; }
+  const list = out.results || [];
+  if(!list.length){
+    box.innerHTML = '<div class="empty">没有达到「' + esc(out.band_label) + '」的结果，试试把置信度调到「宽松」。</div>';
+    return;
+  }
+  const apiConfirmed = list.some(r => r.api_matched);
+  const cards = list.map(r => {
+    const im = byId(r.id);
+    if(!im) return "";
+    const face = faceLabelOf(im.id);
+    const confLabel = (r.api_matched && r.score < out.threshold) ? "API 确认" : out.band_label;
+    return '<div class="photo" data-semopen="' + esc(im.id) + '">' +
+      '<img src="' + thumbUrl(im) + '" alt="' + esc(im.filename) + '" loading="lazy">' +
+      '<div class="meta"><div class="name">' + esc(im.filename) + '</div>' +
+      '<div class="small">相关度 ' + r.score + ' · ' + esc(confLabel) +
+      (r.api_matched ? ' · <span class="tag">API 精排</span>' : '') + '</div>' +
+      '<div class="small">' + fmtDate(im.exif_time) + (face ? ' · ' + esc(face) : '') + '</div></div></div>';
+  }).join("");
+  box.innerHTML = '<div class="sem-row" style="margin-top:24px;"><span class="sem-label">「' +
+    esc(out.query) + '」命中 <strong>' + list.length + '</strong> 张 · 置信度 ' +
+    esc(out.band_label) + '（≥ ' + out.threshold + ' 分）' +
+    (apiConfirmed ? ' · 含 API 精排确认' : '') + '</span></div>' +
+    '<div class="result-grid">' + cards + '</div>';
+  box.querySelectorAll("[data-semopen]").forEach(n =>
+    n.addEventListener("click", () => openModal(n.dataset.semopen)));
+}
+function openPrivacyModal(){
+  const root = document.getElementById("modal-root");
+  const provider = (sem.settings && (sem.settings.providers || []).find(
+    p => p.id === sem.settings.provider)) || { label: "所选厂商" };
+  root.innerHTML = '<div class="modal-bg" id="modal-bg"><div class="modal" style="max-width:560px;">' +
+    '<h3 style="margin:0 0 12px;">API 精排的隐私说明</h3>' +
+    '<p style="color:#737373;font-size:13px;line-height:1.8;margin:0 0 12px;">' +
+    '只有在你自己勾选「本次启用 API 精排」的那一次搜索里，拾影才会把：<br>' +
+    '① 本地粗筛出的前 20 张候选照片的 <strong>200×200 低清缩略图</strong>（拼成 2 张带序号的黑底图）；<br>' +
+    '② 你输入的搜索词；<br>通过 HTTPS 发送给 <strong>' + esc(provider.label) + '</strong> 做相关性排序。<br>' +
+    '不会上传原图、不会上传完整路径、不会上传人脸分组或拍摄时间，也不会在后台自动发送。' +
+    '不勾选时完全离线；请求超时 9 秒或失败会自动退回本地结果。</p>' +
+    '<p style="color:#737373;font-size:12px;line-height:1.7;margin:0 0 16px;">' +
+    'API Key 用 Windows DPAPI 加密保存（绑定当前 Windows 账户），界面与日志只显示掩码。</p>' +
+    '<button id="btn-privacy-ok">我已知晓并开启</button> ' +
+    '<button id="btn-privacy-cancel">取消（仅用本地搜索）</button></div></div>';
+  document.getElementById("btn-privacy-cancel").addEventListener("click", () => {
+    document.getElementById("sem-use-api").checked = false; closeModal();
+  });
+  document.getElementById("btn-privacy-ok").addEventListener("click", async () => {
+    try{
+      sem.settings = await api("/api/semantic/privacy_ack", {});
+      document.getElementById("sem-use-api").checked = true;
+      closeModal(); toast("已开启：只在本次勾选时精排");
+      if(semQuery()) semSearchNow();
+    }catch(e){ toast("记录隐私确认失败：" + e.message); }
+  });
+}
+function openApiSettings(){
+  const s = sem.settings || {};
+  const providers = s.providers || [];
+  const root = document.getElementById("modal-root");
+  const opts = providers.map(p =>
+    '<option value="' + esc(p.id) + '"' + (p.id === s.provider ? " selected" : "") + '>' +
+    esc(p.label) + '</option>').join("");
+  const custom = s.provider === "custom";
+  root.innerHTML = '<div class="modal-bg" id="modal-bg"><div class="modal" style="max-width:560px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+    '<h3 style="margin:0;">API 精排设置</h3><button id="btn-api-close" class="small">关闭</button></div>' +
+    '<p style="color:#737373;font-size:12px;line-height:1.7;margin:0 0 18px;">' +
+    '默认关闭，只有每次手动勾选才调用。请求走 OpenAI 兼容的 /chat/completions，超时 9 秒，失败自动退回本地。</p>' +
+    '<div class="field"><label>厂商</label><select id="api-provider">' + opts + '</select></div>' +
+    '<div class="field" id="api-custom-base" style="display:' + (custom ? "block" : "none") + ';">' +
+    '<label>base_url（到 /v1 为止）</label><input type="text" id="api-base" value="' + esc(s.custom_base_url || "") + '" placeholder="https://example.com/v1"></div>' +
+    '<div class="field" id="api-custom-model" style="display:' + (custom ? "block" : "none") + ';">' +
+    '<label>模型名</label><input type="text" id="api-model" value="' + esc(s.custom_model || "") + '" placeholder="your-vision-model"></div>' +
+    '<div class="field"><label>API Key（' + esc(s.key_storage || "") + '）</label>' +
+    '<input type="password" id="api-key" autocomplete="off" placeholder="' +
+    (s.has_key ? "已保存 " + esc(s.masked_key) + "，留空表示不修改" : "粘贴你的 API Key") + '"></div>' +
+    '<p style="color:#737373;font-size:12px;line-height:1.7;margin:0 0 16px;" id="api-endpoint-note"></p>' +
+    '<button id="btn-api-save">保存设置</button> <button id="btn-api-clear">清除 Key</button></div></div>';
+  function syncProvider(){
+    const id = document.getElementById("api-provider").value;
+    const isCustom = id === "custom";
+    document.getElementById("api-custom-base").style.display = isCustom ? "block" : "none";
+    document.getElementById("api-custom-model").style.display = isCustom ? "block" : "none";
+    const p = providers.find(x => x.id === id) || {};
+    document.getElementById("api-endpoint-note").textContent = isCustom
+      ? "自定义接口必须兼容 OpenAI 的 /chat/completions，并能接收 data:image/jpeg;base64 图片。"
+      : ("默认地址：" + (p.base_url || "") + " · 模型：" + (p.model || "") + "。" + (p.note || ""));
+  }
+  document.getElementById("api-provider").addEventListener("change", syncProvider);
+  syncProvider();
+  document.getElementById("btn-api-close").addEventListener("click", closeModal);
+  document.getElementById("btn-api-clear").addEventListener("click", async () => {
+    try{
+      sem.settings = await api("/api/settings", { clear_key: true });
+      toast("已清除 API Key"); closeModal(); renderSemPanel();
+    }catch(e){ toast("清除失败：" + e.message); }
+  });
+  document.getElementById("btn-api-save").addEventListener("click", async () => {
+    const provider = document.getElementById("api-provider").value;
+    const payload = { provider: provider };
+    if(provider === "custom"){
+      payload.base_url = document.getElementById("api-base").value.trim();
+      payload.model = document.getElementById("api-model").value.trim();
+      if(!payload.base_url || !payload.model){ toast("自定义接口需要同时填写 base_url 与模型名"); return; }
+    }
+    const key = document.getElementById("api-key").value.trim();
+    if(key) payload.api_key = key;
+    try{
+      sem.settings = await api("/api/settings", payload);
+      toast(key ? "设置已保存，Key 已加密保存" : "设置已保存");
+      closeModal(); renderSemPanel();
+    }catch(e){ toast("保存失败：" + e.message); }
+  });
+}
+function afterDataChange(){
+  if(sem.mode === "semantic"){
+    semFetchStatus().then(() => { if(semQuery()) semSearchNow(); });
+  }
+}
+
+// ---------------------------------------------------------------- 事件绑定
+document.querySelectorAll("nav.tabs a[data-tab]").forEach(a =>
+  a.addEventListener("click", () => showTab(a.dataset.tab)));
+document.getElementById("btn-more").addEventListener("click", e => {
+  e.stopPropagation(); toggleMore();
+});
+document.getElementById("more-menu").addEventListener("click", e => e.stopPropagation());
+document.addEventListener("click", () => toggleMore(false));
 document.getElementById("pills").addEventListener("click", e => {
   const b = e.target.closest("[data-filter]"); if(!b) return;
   state.filter = b.dataset.filter; resetPaging(); renderAll();
 });
+function showPeopleSub(sub){
+  const conf = document.getElementById("people-confirmed");
+  const rev = document.getElementById("people-review");
+  if(conf) conf.style.display = sub === "confirmed" ? "" : "none";
+  if(rev) rev.style.display = sub === "review" ? "" : "none";
+  document.querySelectorAll("#people-subtabs .pill").forEach(x =>
+    x.classList.toggle("active", x.dataset.sub === sub));
+}
+document.getElementById("people-subtabs").addEventListener("click", e => {
+  const b = e.target.closest("[data-sub]"); if(!b) return;
+  showPeopleSub(b.dataset.sub);
+  if(b.dataset.sub === "review" && !review.data && !review.loading) loadReview();
+});
 document.getElementById("input-search").addEventListener("input", e => {
   if(sem.mode === "semantic"){ semScheduleSearch(); return; }
-  state.search = e.target.value; resetPaging(); renderGallery();
+  state.search = e.target.value; resetPaging();
+  if(currentTab !== "all") showTab("all", true);
+  renderGallery();
 });
 document.getElementById("search-mode").addEventListener("click", e => {
   const b = e.target.closest("[data-smode]");
@@ -1131,15 +1974,10 @@ document.getElementById("sem-use-api").addEventListener("change", async e => {
   if(!sem.settings) await semFetchStatus();
   const s = sem.settings || {};
   if(!s.has_key){
-    e.target.checked = false;
-    openApiSettings();
-    toast("先配置 API Key 再启用精排");
-    return;
+    e.target.checked = false; openApiSettings(); toast("先配置 API Key 再启用精排"); return;
   }
   if(!s.privacy_ack){
-    e.target.checked = false;
-    openPrivacyModal();
-    return;
+    e.target.checked = false; openPrivacyModal(); return;
   }
   if(semQuery()) semSearchNow();
 });
@@ -1152,16 +1990,18 @@ document.getElementById("tab-demo").addEventListener("click", async () => {
   }
   resetPaging(); renderAll(); afterDataChange();
 });
-document.getElementById("tab-custom").addEventListener("click", () => { state.mode = "custom"; resetPaging(); renderAll(); });
+document.getElementById("tab-custom").addEventListener("click", () => {
+  state.mode = "custom"; resetPaging(); renderAll();
+});
+document.getElementById("btn-pick-scan").addEventListener("click", pickAndScan);
 document.getElementById("btn-demo").addEventListener("click", async () => {
   const data = await runScan({ demo: true }, "加载演示中…");
   if(!data){ return; }
   state.demo = data; state.mode = "demo";
-  toast("演示数据已加载（25 张合成测试图）"); resetPaging(); renderAll(); afterDataChange();
+  toast("演示数据已加载（" + data.stats.total + " 张合成测试图）");
+  resetPaging(); renderAll(); afterDataChange();
 });
 document.getElementById("btn-pick").addEventListener("click", async () => {
-  // P1-1：对话框在服务端子进程里弹，这里只等结果；等待期间按钮禁用，
-  // 无 GUI 环境时接口返回 ok=false，前端平滑降级为手输路径。
   if(scanBusy){ toast("正在扫描中，请稍候"); return; }
   const b = document.getElementById("btn-pick");
   const label = b.textContent;
@@ -1170,14 +2010,10 @@ document.getElementById("btn-pick").addEventListener("click", async () => {
     const res = await api("/api/pick_folder");
     if(res.ok && res.path){
       document.getElementById("input-path").value = res.path;
-      toast("已填入：" + res.path + "，点“扫描这个文件夹”开始");
-    } else if(res.cancelled){
-      toast("已取消选择");
-    } else if(res.timeout){
-      toast("选择文件夹超时，请手动输入路径");
-    } else {
-      toast((res.reason || "当前环境无图形界面") + "，请手动输入文件夹路径");
-    }
+      toast("已填入：" + res.path + "，点「扫描这个文件夹」开始");
+    } else if(res.cancelled){ toast("已取消选择"); }
+    else if(res.timeout){ toast("选择文件夹超时，请手动输入路径"); }
+    else { toast((res.reason || "当前环境无图形界面") + "，请手动输入文件夹路径"); }
   }catch(e){ toast("选择文件夹失败：" + e.message + "，请手动输入路径"); }
   finally{ b.disabled = false; b.textContent = label; }
 });
@@ -1186,15 +2022,15 @@ document.getElementById("btn-scan").addEventListener("click", async () => {
   if(!path){ toast("请先输入本地文件夹路径"); return; }
   const data = await runScan({ path: path }, "扫描中…");
   if(!data){ return; }
-  state.custom = data;
-  state.mode = "custom"; toast("扫描完成：共 " + state.custom.stats.total + " 张"); resetPaging(); renderAll(); afterDataChange();
+  state.custom = data; state.mode = "custom";
+  toast("扫描完成：共 " + data.stats.total + " 张");
+  resetPaging(); renderAll(); afterDataChange();
 });
 document.getElementById("btn-export").addEventListener("click", () => {
   const d = cur(); if(!d){ toast("还没有数据可导出"); return; }
-  // P1-8：不导出本机完整绝对路径；照片路径都是相对扫描文件夹的相对路径。
   const payload = {
     exported_at: new Date().toISOString(),
-    tool_version: "3.3.0",
+    tool_version: "3.4.0",
     source_dir_name: folderName(d.source_dir || ""),
     source_dir_note: "已脱敏：仅保留文件夹名称与相对路径，不含本机完整路径",
     stats: d.stats,
@@ -1211,31 +2047,29 @@ document.getElementById("btn-export").addEventListener("click", () => {
   URL.revokeObjectURL(a.href); toast("清单已导出（相对路径，不含完整本机路径）");
 });
 document.getElementById("btn-reset").addEventListener("click", () => {
-  basket = []; names = {}; state.search = ""; state.filter = "all";
+  basket = []; state.search = ""; state.filter = "all";
   document.getElementById("input-search").value = "";
-  sem.results = null; sem.seq++;
-  semSetNotice("");
+  sem.results = null; sem.seq++; semSetNotice("");
   const semBox = document.getElementById("sem-results");
   if(semBox) semBox.innerHTML = "";
   localStorage.removeItem(LS_BASKET_V1);
-  resetPaging();
-  saveLocal(); toast("已重置：篓子、改名与筛选已清空（没有删除任何文件）"); renderAll();
+  resetPaging(); saveLocal();
+  toast("已重置：待删篓与筛选已清空（没有删除任何文件）；人名与复核记录在本机数据文件里，不受影响");
+  renderAll();
   if(sem.mode === "semantic") renderSemResults();
 });
 document.getElementById("btn-stop").addEventListener("click", async () => {
-  if(!confirm("确定要停止本地服务吗？停止后窗口会一起关闭，需重新打开 Shiying-3.3.0。")) return;
+  if(!confirm("确定要停止本地服务吗？停止后窗口会一起关闭，需重新打开 Shiying-3.4.0。")) return;
   try{ await api("/api/shutdown", {}); }catch(e){}
-  // P0-3：先让窗口自己关（--app 模式下 window.close() 会触发进程退出；
-  // pywebview 由 app_native 主线程销毁）。关不掉时才显示遮罩说明。
   if(SESSION){ setTimeout(() => { try{ window.close(); }catch(e){} }, 300); }
   setTimeout(() => {
     if(document.visibilityState === "hidden") return;
     document.body.insertAdjacentHTML("beforeend",
-      '<div class="stop-overlay"><div><h2>服务已停止</h2><p style="color:#737373;">本地服务已干净停止，没有后台残留。<br>想再用时，重新打开 Shiying-3.3.0（app_native）即可。</p></div></div>');
+      '<div class="stop-overlay"><div><h2>服务已停止</h2><p style="color:#737373;">本地服务已干净停止，没有后台残留。<br>想再用时，重新打开 Shiying-3.4.0（app_native）即可。</p></div></div>');
   }, 1200);
 });
 
-// P0-2：窗口心跳。app_native 用“心跳 + pagehide 关闭信号 + 进程退出”
+// P0-2：窗口心跳。app_native 用「心跳 + pagehide 关闭信号 + 进程退出」
 // 三条线索判断窗口是否还活着；刷新页面时 ping 会把关闭信号撤销。
 const SESSION = (function(){
   try{ return new URLSearchParams(location.search).get("s") || ""; }catch(e){ return ""; }
@@ -1268,6 +2102,9 @@ if(SESSION){
   try{ data = await runScan({ demo: true }, "加载演示中…"); }
   catch(e){ toast("演示加载失败：" + e.message + "（可手动输入文件夹扫描）"); }
   if(data) state.demo = data;
+  // 3.4.0：把 localStorage 里的旧人名一次性迁到本机数据文件。迁移不依赖
+  // 扫描是否成功——旧名绝不能因为扫描失败就丢掉。
+  await migrateLegacyNames();
   renderAll();
   semFetchStatus();
   if(basket.some(e => e.legacy)){

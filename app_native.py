@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shiying-3.3.0 原生窗口启动入口：像桌面软件一样打开，不显示地址栏。
+"""Shiying-3.4.0 原生窗口启动入口：像桌面软件一样打开，不显示地址栏。
 
 启动顺序：
   1) 首选 pywebview（Windows 上即系统 WebView2）创建原生窗口；
@@ -209,8 +209,8 @@ import uuid
 from http.server import ThreadingHTTPServer
 
 
-VERSION = "3.3.0"
-WINDOW_TITLE = "拾影 Shiying-3.3.0"
+VERSION = "3.4.0"
+WINDOW_TITLE = "拾影 Shiying-3.4.0"
 _SESSION = uuid.uuid4().hex
 _SERVER_MOD = None
 
@@ -589,6 +589,18 @@ def _pick_folder_cli():
 def _self_test(port):
     """不打开窗口，起服务 -> 校验页面/接口/演示扫描/二次确认 -> 干净退出。"""
     httpd, url = _start_server(port)
+    # 自检会临时改写本机复核数据：在任何扫描写盘之前先备份，结束时原样还回去。
+    store_path = None
+    store_backup = None
+    store_existed = False
+    try:
+        store_path = _SERVER_MOD.review_paths()[0]
+        store_existed = os.path.isfile(store_path)
+        if store_existed:
+            with open(store_path, "rb") as f:
+                store_backup = f.read()
+    except Exception as e:
+        log("自检：无法备份复核数据文件：%s" % e)
     try:
         status, html = _http_get(url)
         ok_html = (status == 200 and b"<title>" in html
@@ -644,6 +656,198 @@ def _self_test(port):
                     and s.get("screenshots") == 2
                     and s.get("no_exif") == 4)
 
+        # ---- 3.4.0 复核表自检（单脸 / 三卡片 / 批量 / 撤销 / 冲突 / 人名迁移）----
+        # 会临时改写本机 face_review.json：开跑前备份，跑完原样还回去。
+        review_ok = {"steps": [], "passed": False}
+        try:
+            if not store_path:
+                raise RuntimeError("拿不到复核数据文件路径")
+            _status, raw_rev = _http_get(url + "api/review/list")
+            rv = json.loads(raw_rev.decode("utf-8"))
+            cards = rv.get("cards") or {}
+            counts = rv.get("counts") or {}
+            pending0 = counts.get("pending") or 0
+            ok_three = (rv.get("ok") is True
+                        and all(k in cards for k in
+                                ("suggested", "doubtful", "unmatched"))
+                        and pending0 > 0)
+            review_ok["steps"].append(
+                "三卡片 建议=%s 可疑=%s 未匹配=%s 待复核=%s"
+                % (len(cards.get("suggested") or []),
+                   len(cards.get("doubtful") or []),
+                   len(cards.get("unmatched") or []), pending0))
+            flat = ((cards.get("suggested") or []) + (cards.get("doubtful") or [])
+                    + (cards.get("unmatched") or []))
+            first = flat[0]
+
+            # 确定性脸序号：同一张图的多张脸按框中心先左后右（不按检测分）
+            by_img = {}
+            for face in (scan.get("face_faces") or []):
+                by_img.setdefault(face.get("image_id"), []).append(face)
+            multi = [v for v in by_img.values() if len(v) > 1]
+
+            def _cx(f):
+                box = f.get("box") or [0, 0, 0, 0]
+                return box[0] + box[2] / 2.0
+            ok_order = bool(multi) and all(
+                [f["key"] for f in sorted(v, key=lambda x: x["index"])]
+                == [f["key"] for f in sorted(v, key=_cx)]
+                for v in multi)
+            review_ok["steps"].append(
+                "同图多脸按框中心排序=%s（%s 张图有 2 张以上人脸）"
+                % (ok_order, len(multi)))
+
+            # 裁剪完整性自查：脸框必须完整落在裁剪矩形内；四周留白边
+            # 不再焊死在 JPEG 里（深色下纯白边刺眼），改由前端 .revcrop
+            # 的 CSS padding 按主题给，这里同时验 CSS 规则在不在。
+            crop_meta = {}
+            css_ok = False
+            try:
+                import face_review as fr_mod
+                import io as _io
+                from PIL import Image as _Image
+                face0 = flat[0]
+                demo_img = os.path.join(scan["source_dir"], face0["image_id"])
+                cbytes, crop_meta = fr_mod.crop_face(demo_img, face0["box"],
+                                                     size=168)
+                cimg = _Image.open(_io.BytesIO(cbytes)).convert("RGB")
+                html_path = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)), "index.html")
+                with open(html_path, encoding="utf-8") as _hf:
+                    html = _hf.read()
+                css_ok = (".revcrop" in html and "padding:4px" in html
+                          and "var(--surface)" in html)
+                ok_crop_meta = (crop_meta.get("face_fully_inside") is True
+                                and cimg.size == (168, 168) and css_ok)
+            except Exception as e:
+                ok_crop_meta = False
+                crop_meta = {"error": str(e)}
+            review_ok["steps"].append(
+                "裁剪完整性 脸框全在裁剪矩形内=%s 留白边走前端 CSS=%s 输出=%s"
+                % (crop_meta.get("face_fully_inside"), css_ok,
+                   crop_meta.get("out_size")))
+
+            # 单脸裁剪：动态接口 + 白边（尺寸与 JPEG 头都验一下）
+            _status, jpg = _http_get(
+                url + "api/review/crop?k=" + urllib.parse.quote(first["key"])
+                + "&size=168")
+            ok_crop = (_status == 200 and jpg[:2] == b"\xff\xd8" and len(jpg) > 500)
+            review_ok["steps"].append(
+                "裁剪接口 168px=%s（%s 字节）" % (ok_crop, len(jpg)))
+
+            # 批量：三张脸记为一条事务
+            keys = [r["key"] for r in flat][:3]
+            _status, act = _http_post_json(url + "api/review/act",
+                                           {"action": "ignore", "keys": keys})
+            txn = act.get("txn") or {}
+            ok_batch = (len(txn.get("items") or []) == len(keys)
+                        and (act.get("counts") or {}).get("pending")
+                        == pending0 - len(keys))
+            review_ok["steps"].append(
+                "批量忽略 %s 张 -> 一条事务（%s 项），待复核 %s -> %s"
+                % (len(keys), len(txn.get("items") or []), pending0,
+                   (act.get("counts") or {}).get("pending")))
+
+            # 整批撤销
+            _status, undo = _http_post_json(
+                url + "api/review/undo", {"txn_id": txn.get("txn_id")})
+            ok_undo = (undo.get("counts") or {}).get("pending") == pending0
+            review_ok["steps"].append(
+                "整批撤销 恢复 %s 张，待复核回到 %s"
+                % ((undo.get("undo") or {}).get("restored"),
+                   (undo.get("counts") or {}).get("pending")))
+
+            # 冲突：同一张脸改两次，撤销旧记录必须 409（不静默覆盖）
+            k0 = keys[0]
+            _status, t1 = _http_post_json(url + "api/review/act",
+                                          {"action": "ignore", "keys": [k0]})
+            _status, t2 = _http_post_json(url + "api/review/act",
+                                          {"action": "adopt", "keys": [k0]})
+            conflict_status = None
+            try:
+                _http_post_json(url + "api/review/undo",
+                                {"txn_id": (t1.get("txn") or {}).get("txn_id")})
+            except urllib.error.HTTPError as e:
+                conflict_status = e.code
+            ok_conflict = conflict_status == 409
+            review_ok["steps"].append(
+                "撤销旧记录遇到后来改动 -> HTTP %s（应为 409）" % conflict_status)
+            _http_post_json(url + "api/review/undo",
+                            {"txn_id": (t2.get("txn") or {}).get("txn_id")})
+            # t1 当时被后来的改动挡下（这正是要验的行为），这里强行收尾，
+            # 把这张脸放回“待复核”，后面的步骤才从干净状态开始。
+            try:
+                _http_post_json(url + "api/review/undo",
+                                {"txn_id": (t1.get("txn") or {}).get("txn_id"),
+                                 "force": True})
+            except urllib.error.HTTPError:
+                pass
+
+            # 新建人物 + 改名（人名写本机文件）
+            _status, np_ = _http_post_json(
+                url + "api/review/act",
+                {"action": "new_person", "keys": [k0], "name": "自检人物"})
+            pid = ((np_.get("created_persons") or [{}])[0]).get("id")
+            _status, rn = _http_post_json(
+                url + "api/review/names",
+                {"person_id": pid, "name": "自检改名"})
+            ok_names = any(p.get("id") == pid and p.get("name") == "自检改名"
+                           for p in (rn.get("persons") or []))
+            review_ok["steps"].append(
+                "新建人物 %s + 改名落盘=%s" % (pid, ok_names))
+            _http_post_json(url + "api/review/undo",
+                            {"txn_id": (rn.get("txn") or {}).get("txn_id")})
+            _http_post_json(url + "api/review/undo",
+                            {"txn_id": (np_.get("txn") or {}).get("txn_id")})
+
+            # 旧人名一次性迁移（第二次必须 already_done）
+            _status, mg = _http_post_json(
+                url + "api/review/migrate_names",
+                {"names": {"selftest_legacy": "旧名字"}})
+            mg1 = mg.get("migration_result") or {}
+            _status, mg2 = _http_post_json(
+                url + "api/review/migrate_names", {"names": {"x": "y"}})
+            mg2r = mg2.get("migration_result") or {}
+            ok_migrate = (mg1.get("migrated") == 1
+                          and mg2r.get("already_done") is True)
+            review_ok["steps"].append(
+                "旧人名迁移 首次 %s 条，第二次 already_done=%s"
+                % (mg1.get("migrated"), mg2r.get("already_done")))
+
+            # 忽略的脸重扫不再出现
+            _http_post_json(url + "api/review/act",
+                            {"action": "ignore", "keys": [k0]})
+            _http_post_json(url + "api/scan", {"demo": True})
+            _status, raw_rev2 = _http_get(url + "api/review/list")
+            rv2 = json.loads(raw_rev2.decode("utf-8"))
+            keys2 = set()
+            for bucket in (rv2.get("cards") or {}).values():
+                for row in bucket:
+                    keys2.add(row["key"])
+            ok_ignore = k0 not in keys2
+            review_ok["steps"].append(
+                "忽略后重扫仍在复核表里=%s（应为 False）" % (k0 in keys2))
+            _status, act2 = _http_post_json(
+                url + "api/review/act", {"action": "adopt", "keys": [k0]})
+            _http_post_json(url + "api/scan", {"demo": True})
+
+            # 单文件三部分：人物 / 每张脸状态 / 操作历史
+            with open(store_path, encoding="utf-8") as f:
+                raw_store = json.load(f)
+            ok_store = all(k in raw_store for k in ("persons", "faces",
+                                                   "history"))
+            review_ok["steps"].append(
+                "本机数据文件三部分=%s（%s）"
+                % (ok_store, os.path.basename(store_path)))
+            review_ok["passed"] = bool(ok_three and ok_order and ok_crop_meta
+                                       and ok_crop and ok_batch
+                                       and ok_undo and ok_conflict
+                                       and ok_names and ok_migrate
+                                       and ok_ignore and ok_store)
+        except Exception as e:
+            review_ok["error"] = str(e)
+            log("自检：复核表检查出错：%s" % e)
+
         # ---- 3.3.0 语义搜图自检（模型没下载时跳过，不擅自下载 190MB）----
         sem_ok = {"status": False, "index": None, "queries": [],
                   "api_fallback": None, "skipped": ""}
@@ -653,6 +857,7 @@ def _self_test(port):
             sem_ok["status"] = (status == 200 and sem.get("model", {}).get("dim") == 512
                                 and bool(sem.get("model", {}).get("model_id")))
             sem_ok["model_label"] = sem.get("model", {}).get("model_label")
+            sem_ok["model_present"] = bool(sem.get("model", {}).get("present"))
             if not sem.get("model", {}).get("present"):
                 sem_ok["skipped"] = "本机没有语义模型（未下载），跳过索引与搜索自检"
             else:
@@ -739,11 +944,31 @@ def _self_test(port):
                     % (sem_ok["api_fallback"], sem_ok.get("api_notice")))
 
         # P0-2 修复：旧 passed 没检查 index_ok 与 api_fallback，门禁形同虚设。
+        # 缺模型时语义索引/搜索是“跳过”，既不算通过也不算失败；
+        # 有模型时必须真跑通，绝不把跳过写成通过。
+        model_present = bool(sem_ok.get("model_present"))
+        if model_present:
+            sem_gate = bool(sem_ok.get("index_ok")
+                            and sem_ok.get("api_fallback")
+                            and sem_queries_ok)
+        else:
+            sem_gate = None
         passed = (ok_html and ok_health and ok_ping and ok_thumb
                   and not missing and delete_status == 400
                   and mismatch_ok and legacy_ok and baseline
-                  and sem_ok["status"] and ok_settings and sem_queries_ok
-                  and sem_ok.get("index_ok") and sem_ok.get("api_fallback"))
+                  and sem_ok["status"] and ok_settings
+                  and (sem_gate is not False)
+                  and review_ok.get("passed") is True)
+        log("自检：复核表 %s"
+            % ("通过" if review_ok.get("passed") else
+               ("跳过（%s）" % review_ok.get("error")
+                if review_ok.get("error") else "失败")))
+        for step in review_ok.get("steps") or []:
+            log("自检：复核表 · %s" % step)
+        if model_present:
+            log("自检：语义索引/搜索 真跑=%s" % sem_gate)
+        else:
+            log("自检：语义索引/搜索 因本机没有模型而跳过（不算通过，也不算失败）")
         if missing:
             log("自检：缺少字段 %s" % missing)
         if not baseline:
@@ -757,6 +982,16 @@ def _self_test(port):
         traceback.print_exc()
         return 1
     finally:
+        # 把用户原来的复核数据原样放回去，自检不留脏数据。
+        if store_path:
+            try:
+                if store_backup is not None:
+                    with open(store_path, "wb") as f:
+                        f.write(store_backup)
+                elif not store_existed and os.path.isfile(store_path):
+                    os.remove(store_path)
+            except Exception as e:
+                log("自检：复核数据还原失败：%s" % e)
         _stop_server(httpd)
 
 
@@ -779,7 +1014,7 @@ def _instance_message(lock_path):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="Shiying-3.3.0 原生窗口入口（照片整理与去重）")
+        description="Shiying-3.4.0 原生窗口入口（照片整理与去重）")
     ap.add_argument("--port", type=int, default=0,
                     help="指定端口（默认自动在 8765~8774 间选空闲端口）")
     ap.add_argument("--no-window", action="store_true",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""本地语义搜图（3.3.0）：Chinese-CLIP 图像/文本向量 + 可续算索引。
+"""本地语义搜图（3.4.0）：Chinese-CLIP 图像/文本向量 + 可续算索引。
 
 设计要点（与 3.3.0 规格逐条对应）：
 
@@ -199,7 +199,7 @@ def _download_one(urls, dest, expected_bytes, expected_sha256,
     for url in urls:
         part = dest + ".part"
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Shiying/3.3.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "Shiying/3.4.0"})
             with urllib.request.urlopen(req, timeout=60) as resp:
                 total = int(resp.headers.get("Content-Length") or 0) or expected_bytes
                 done = 0

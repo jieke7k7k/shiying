@@ -1,4 +1,4 @@
-# PhotoOrganizer-3.3.0 · 本地照片整理与去重（本地优先，API 可选）
+# PhotoOrganizer-3.4.0 · 本地照片整理与去重（本地优先，API 可选）
 Pillow>=10
 # 3.3.0 语义搜图：onnxruntime 跑 Chinese-CLIP INT8（不用 cv2.dnn，
 # 它对 Transformer 算子兼容差）。模型本身不随包捆绑，首次点“建立语义

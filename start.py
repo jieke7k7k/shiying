@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Shiying-3.3.0 的浏览器回退启动脚本（legacy）。
+"""Shiying-3.4.0 的浏览器回退启动脚本（legacy）。
 
-3.3.0 的正式入口是 app_native.py（原生窗口、单实例、干净关闭协议）。
+3.4.0 的正式入口是 app_native.py（原生窗口、单实例、干净关闭协议）。
 本文件保留给“不想装 pywebview、也不需要无边框窗口”的场景：双击
 （配合 start.bat）或 python3 start.py 会起服务并用默认浏览器打开。
 

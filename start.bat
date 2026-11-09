@@ -1,5 +1,5 @@
 @echo off
-REM Shiying-3.3.0 · Windows 双击启动入口
+REM Shiying-3.4.0 · Windows 双击启动入口
 REM 双击本文件打开 app_native.py 的原生窗口（pywebview，缺省回退
 REM Chrome/Edge 的 --app 应用窗口）；用完后点页面“停止服务”，
 REM 窗口与服务会一起关闭，不驻留后台。
@@ -14,7 +14,7 @@ REM 注意：本机 Linux 无法执行 .bat，本文件只做内容审查，
 REM 须在 Windows 真机上实测。
 chcp 65001 >nul
 set PYTHONUTF8=1
-title Shiying-3.3.0
+title Shiying-3.4.0
 cd /d "%~dp0"
 
 REM ---- 找 Python（优先 py 启动器，其次 python）----

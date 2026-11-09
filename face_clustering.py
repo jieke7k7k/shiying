@@ -54,9 +54,11 @@ cv2.FaceDetectorYN（YuNet）+ cv2.FaceRecognizerSF（SFace），两者
      余弦距离 DBSCAN 聚类；不可用或未检出时返回 []。
 """
 import atexit
+import json
 import os
 import shutil
 import tempfile
+from collections import defaultdict
 
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 try:
@@ -310,6 +312,12 @@ def _dbscan_cosine(vectors, eps):
     vectors：已 L2 归一化的特征向量列表。
     返回：与 vectors 等长的簇标签列表（0, 1, 2, ...）。
     """
+    # 修复（2026-11-09 小马自查发现）：analyze_faces 存进 vectors 的是
+    # list（_l2_normalize 返回 list），这里直接调 .dot() 会在 2 张脸
+    # 以上时报 AttributeError，整条真实聚类链路静默退回测试分组。
+    # 先统一转成 ndarray 再算点积。
+    import numpy as np
+    vectors = [np.asarray(v, dtype=float) for v in vectors]
     n = len(vectors)
     labels = [-1] * n
     # 余弦距离 = 1 - 点积（向量已归一化）。
@@ -337,74 +345,350 @@ def _dbscan_cosine(vectors, eps):
     return labels
 
 
-def cluster_faces(images, root):
-    """YuNet + SFace 真实聚类。不可用或未检出时返回 []（由调用方兜底）。
+# ---------------------------------------------------------------- 3.4.0 单脸
+# 3.4.0 复核表要按“单张脸”工作，而不是按“某组照片”。为此本模块新增：
+#   - face_key()：单脸主键 = 照片内容哈希前 16 位 + 脸序号；
+#   - analyze_faces()：一次检测出所有单脸，保留框、检测分与 128 维特征；
+#   - 特征落盘缓存（单独的 JSON 缓存文件），重扫直接复用，不重复算；
+#   - 脸序号按框中心确定性排序（先上后下、同一行再左到右），不按检测分；
+#   - 已忽略的脸在聚类前就被剔除，不参与聚类，免得把两个簇“桥接”起来。
+ALGO_TAG = "yunet070-sface128-bandrow-v1"
+EMBED_DIM = 128
+FACE_KEY_HEX = 16
 
-    images：scan.py 的 ok 列表（每项含 relative_path）。
-    返回：[{id, label, method, members}]，method 恒为 embedding_dbscan。
-    一张图里有多张脸时，每张脸单独参与聚类，图片可能同时出现在
-    多个分组里（这是正确的：合影里确实有多个不同的人）。
+
+def face_key(sha256, index):
+    """单脸主键：照片内容哈希前 16 位 + 脸序号（同内容照片共享同一身份）。"""
+    hexpart = (sha256 or "")[:FACE_KEY_HEX].lower()
+    if not hexpart:
+        hexpart = "0" * FACE_KEY_HEX
+    return "f%s-%d" % (hexpart, int(index))
+
+
+def parse_face_key(key):
+    """把主键拆回 (哈希前缀, 脸序号)；格式不对时返回 (None, None)。"""
+    try:
+        body = str(key)[1:]
+        hexpart, idx = body.split("-", 1)
+        return hexpart, int(idx)
+    except Exception:
+        return None, None
+
+
+def cluster_id_for(anchor_key):
+    """自动簇 id：锚点脸哈希前缀（不再用“人物 1/2/3”顺序编号）。"""
+    hexpart, idx = parse_face_key(anchor_key)
+    if not hexpart:
+        return "af_unknown"
+    return "af_%s-%s" % (hexpart[:8], idx)
+
+
+def _l2_normalize(vec):
+    norm = 0.0
+    for v in vec:
+        norm += float(v) * float(v)
+    norm = norm ** 0.5
+    if norm <= 0:
+        return None
+    return [float(v) / norm for v in vec]
+
+
+def _cosine(a, b):
+    if not a or not b:
+        return 0.0
+    n = min(len(a), len(b))
+    s = 0.0
+    for i in range(n):
+        s += a[i] * b[i]
+    return s
+
+
+def _box_area(box):
+    try:
+        return max(0.0, float(box[2])) * max(0.0, float(box[3]))
+    except Exception:
+        return 0.0
+
+
+def _order_faces(faces, img_h):
+    """按框中心确定性排序：先上后下（按行带），同一行再左到右。
+
+    行带高度取“中位脸高 × 0.6”，避免同一排人脸因为十几像素的高低
+    差被拆成两行；全部为 0 或异常时回退到严格 (cy, cx)。绝不按检测
+    分数排——检测分随光照抖动，用它排序会让脸序号在重扫后跳变。
     """
+    items = []
+    for face in faces:
+        x, y, w, h = (float(face[0]), float(face[1]),
+                      float(face[2]), float(face[3]))
+        # YuNet 每行是 [x, y, w, h, 置信度, 10 个关键点坐标]：置信度在
+        # 下标 4，绝不能取 face[-1]（那是最后一个关键点的 y 坐标，
+        # 数值几十上百，当检测分会把“检测分 0.95”写成“65.0”，还会
+        # 带偏按检测分选代表脸的排序）。2026-11-09 小马自查修正。
+        items.append((x + w / 2.0, y + h / 2.0, x, y, w, h, float(face[4])))
+    if not items:
+        return []
+    heights = sorted(it[5] for it in items)
+    median_h = heights[len(heights) // 2]
+    band = max(24.0, median_h * 0.6)
+    if img_h:
+        band = min(band, max(24.0, img_h * 0.25))
+    base_y = min(it[1] for it in items)
+    items.sort(key=lambda it: (int((it[1] - base_y) // band), it[0], it[1]))
+    return items
+
+
+# ---- 特征缓存（单独文件，重扫复用）----
+
+def _load_embed_cache(path):
+    cache = {"algo": ALGO_TAG, "entries": {}}
+    if not path:
+        return cache
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        return cache
+    if not isinstance(raw, dict) or raw.get("algo") != ALGO_TAG:
+        # 算法/阈值变了就整体作废，绝不复用可能错位的旧框。
+        return cache
+    entries = raw.get("entries")
+    if isinstance(entries, dict):
+        cache["entries"] = entries
+    return cache
+
+
+def _save_embed_cache(path, cache):
+    if not path:
+        return False
+    try:
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False)
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        return False
+
+
+def _vec_ok(vec):
+    return (isinstance(vec, list) and len(vec) == EMBED_DIM
+            and all(isinstance(v, (int, float)) for v in vec))
+
+
+def analyze_faces(images, root, ignore_keys=None, cache_path=None):
+    """检测 + 提特征 + 聚类，返回“单脸级”结果（3.4.0 复核表的数据底座）。
+
+    images：scan.py 的 ok 列表（每项须含 id / relative_path / sha256）。
+    ignore_keys：已人工忽略的单脸主键集合，这些脸在聚类前就被剔除。
+    cache_path：128 维特征落盘缓存文件；命中即复用，不重算。
+
+    返回：
+      {available, reason, method, faces:[...], clusters:[...],
+       vectors:{key: [128 floats]}, stats:{...}}
+    faces 每项不含向量（向量单独放 vectors，扫描响应 JSON 里绝不塞
+    上百个浮点数），含 key/index/box/det_score/sha256/image_id/w/h。
+    """
+    report = attempt_report()
+    out = {"available": False, "reason": report.get("detail", ""),
+           "method": "none", "faces": [], "clusters": [], "vectors": {},
+           "stats": {"images_with_faces": 0, "faces": 0, "ignored": 0,
+                     "cache_hits": 0, "cache_misses": 0}}
+    if not report.get("embedding_available"):
+        return out
     try:
         import cv2
-    except Exception:
-        return []
+        import numpy as np
+    except Exception as e:
+        out["reason"] = "cv2/numpy 不可用：%s" % e
+        return out
     yunet_path = _find_model(YUNET_CANDIDATES)
     sface_path = _find_model(SFACE_CANDIDATES)
     if not yunet_path or not sface_path:
-        return []
+        return out
     try:
-        import numpy as np
-    except Exception:
-        return []
-    try:
-        # P0-1：模型路径含中文时 OpenCV 读不了，先换成 ASCII 路径。
         detector = cv2.FaceDetectorYN_create(
             _ascii_model_path(yunet_path), "", (320, 320),
             YUNET_SCORE_THRESHOLD, YUNET_NMS_THRESHOLD, YUNET_TOP_K)
         recognizer = cv2.FaceRecognizerSF_create(
             _ascii_model_path(sface_path), "")
-    except Exception:
-        return []
-    instances = []  # (image_id, 归一化特征向量)
+    except Exception as e:
+        out["reason"] = "模型创建失败：%s" % e
+        return out
+
+    ignore_keys = set(ignore_keys or ())
+    cache = _load_embed_cache(cache_path)
+    entries = cache["entries"]
+    dirty = False
+    vectors = {}
+    faces_out = []
+    seen_keys = {}  # P0-1：同内容照片（同 sha256）共享同一单脸，只留一条记录
+    images_with_faces = 0
+    stats = out["stats"]
+
     for item in images:
-        full = os.path.join(root, item["relative_path"])
+        rel = item.get("relative_path")
+        sha = item.get("sha256") or ""
+        if not rel or not sha:
+            continue
         try:
-            img = read_image(full)
+            img = read_image(os.path.join(root, rel))
             if img is None:
                 continue
             h, w = img.shape[:2]
-            detector.setInputSize((w, h))
-            _ret, faces = detector.detect(img)
-            if faces is None:
+            detector.setInputSize((int(w), int(h)))
+            _ret, detected = detector.detect(img)
+            if detected is None or len(detected) == 0:
                 continue
-            for face in faces:
-                try:
-                    aligned = recognizer.alignCrop(img, face)
-                    feat = recognizer.feature(aligned).flatten().astype(float)
-                except Exception:
+            ordered = _order_faces(list(detected), h)
+            images_with_faces += 1
+            for idx, (cx, cy, x, y, bw, bh, score) in enumerate(ordered):
+                key = face_key(sha, idx)
+                if key in ignore_keys:
+                    stats["ignored"] += 1
                     continue
-                norm = float(np.linalg.norm(feat))
-                if norm <= 0:
+                box = [int(round(x)), int(round(y)),
+                       int(round(bw)), int(round(bh))]
+                cached = entries.get(key)
+                vec = None
+                if cached and _vec_ok(cached.get("vec")):
+                    vec = [float(v) for v in cached["vec"]]
+                    stats["cache_hits"] += 1
+                if vec is None:
+                    feature = None
+                    for row in detected:
+                        rx, ry, rw, rh = (float(row[0]), float(row[1]),
+                                          float(row[2]), float(row[3]))
+                        if (abs(rx - x) < 1.5 and abs(ry - y) < 1.5
+                                and abs(rw - bw) < 1.5 and abs(rh - bh) < 1.5):
+                            feature = row
+                            break
+                    if feature is None:
+                        feature = np.array([x, y, bw, bh, 0, 0, 0, 0, 0, 0,
+                                            0, 0, 0, 0, score], dtype=float)
+                    try:
+                        aligned = recognizer.alignCrop(img, feature)
+                        raw = recognizer.feature(aligned).flatten().astype(float)
+                    except Exception:
+                        continue
+                    vec = _l2_normalize(raw)
+                    if vec is None:
+                        continue
+                    stats["cache_misses"] += 1
+                    entries[key] = {"vec": [round(v, 6) for v in vec],
+                                    "box": box, "det": round(score, 4),
+                                    "w": int(w), "h": int(h),
+                                    "image_id": item.get("id") or rel}
+                    dirty = True
+                vectors[key] = vec
+                face_id = item.get("id") or rel
+                if key in seen_keys:
+                    # 同内容重复照片的同一张脸：只复核一次，把这张照片
+                    # 记进同一单脸的 image_ids，不再追加第二条记录。
+                    existing = seen_keys[key]
+                    if face_id not in existing.get("image_ids", []):
+                        existing["image_ids"].append(face_id)
                     continue
-                instances.append((item["id"], feat / norm))
+                face_rec = {
+                    "key": key,
+                    "sha256": sha,
+                    "image_id": face_id,
+                    "image_ids": [face_id],
+                    "relative_path": rel,
+                    "index": idx,
+                    "box": box,
+                    "det_score": round(score, 4),
+                    "image_w": int(w),
+                    "image_h": int(h),
+                    "cache_hit": bool(cached and _vec_ok(cached.get("vec"))),
+                }
+                seen_keys[key] = face_rec
+                faces_out.append(face_rec)
         except Exception:
             continue
-    if not instances:
+
+    if dirty:
+        _save_embed_cache(cache_path, cache)
+
+    stats["images_with_faces"] = images_with_faces
+    stats["faces"] = len(faces_out)
+    out["available"] = True
+    out["method"] = "embedding_dbscan"
+    out["reason"] = ("YuNet 检测（分数阈值 %.1f）+ SFace %d 维特征 + "
+                     "余弦距离 DBSCAN（相似度阈值 %.2f，min_samples=1）。"
+                     % (YUNET_SCORE_THRESHOLD, EMBED_DIM,
+                        COSINE_SIMILARITY_THRESHOLD))
+    out["faces"] = faces_out
+    out["vectors"] = vectors
+    out["clusters"] = _cluster_face_keys(faces_out, vectors)
+    return out
+
+
+def representative_key(member_keys, faces_by_key):
+    """组内代表脸（头像用）：检测分高、框大者优先，同分按主键定序。"""
+    def sort_key(k):
+        face = faces_by_key.get(k) or {}
+        return (-(face.get("det_score") or 0.0),
+                -_box_area(face.get("box") or [0, 0, 0, 0]), k)
+    keys = [k for k in member_keys if k in faces_by_key] or list(member_keys)
+    if not keys:
+        return None
+    return sorted(keys, key=sort_key)[0]
+
+
+def _cluster_face_keys(faces_out, vectors):
+    if not faces_out:
         return []
-    vecs = [v for (_iid, v) in instances]
-    labels = _dbscan_cosine(vecs, COSINE_DISTANCE_EPS)
-    groups = {}
-    for (iid, _v), lab in zip(instances, labels):
-        groups.setdefault(int(lab), set()).add(iid)
+    faces_by_key = {f["key"]: f for f in faces_out}
+    keys = [f["key"] for f in faces_out if f["key"] in vectors]
+    if not keys:
+        return []
+    labels = _dbscan_cosine([vectors[k] for k in keys], COSINE_DISTANCE_EPS)
+    grouped = defaultdict(list)
+    for key, lab in zip(keys, labels):
+        grouped[int(lab)].append(key)
+    clusters = []
+    for lab in sorted(grouped):
+        members = sorted(grouped[lab])
+        anchor = representative_key(members, faces_by_key)
+        cluster = {
+            "cluster_id": cluster_id_for(anchor),
+            "anchor_key": anchor,
+            "member_keys": members,
+            "image_ids": sorted({faces_by_key[k]["image_id"] for k in members}),
+            "size": len(members),
+        }
+        clusters.append(cluster)
+    clusters.sort(key=lambda c: c["cluster_id"])
+    return clusters
+
+
+def cluster_faces(images, root, ignore_keys=None, cache_path=None):
+    """兼容旧调用：返回按组汇总的照片 id 列表（3.4.0 起 id 用锚点哈希）。
+
+    新的复核表走 analyze_faces() 拿单脸级数据；本函数只保留给
+    scan.py 的老字段 face_groups 用，语义与 3.2.0 一致。
+    """
+    res = analyze_faces(images, root, ignore_keys=ignore_keys,
+                        cache_path=cache_path)
+    if not res.get("available") or not res.get("clusters"):
+        return []
     out = []
-    for n, (_lab, members) in enumerate(sorted(groups.items())):
+    for cluster in res["clusters"]:
+        cid = cluster["cluster_id"]
         out.append({
-            "id": "face_%d" % (n + 1),
-            "label": "人物 %d" % (n + 1),
+            "id": cid,
+            "label": "人物 %s" % cid[3:],
             "method": "embedding_dbscan",
-            "note": "YuNet 检测（分数阈值 0.7）+ SFace 特征向量 + "
-                    "余弦距离 DBSCAN（相似度阈值 0.6，min_samples=1）。",
-            "members": sorted(members),
+            "note": ("YuNet 检测（分数阈值 %.1f）+ SFace 特征向量 + "
+                     "余弦距离 DBSCAN（相似度阈值 %.2f，min_samples=1）；"
+                     "簇 id 用锚点脸哈希前缀，不再用顺序编号。"
+                     % (YUNET_SCORE_THRESHOLD, COSINE_SIMILARITY_THRESHOLD)),
+            "members": list(cluster["image_ids"]),
+            "anchor_key": cluster["anchor_key"],
+            "face_count": cluster["size"],
         })
     return out

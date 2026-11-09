@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shiying-3.3.0 本地服务：把扫描与界面串起来，本地优先。
+"""Shiying-3.4.0 本地服务：把扫描与界面串起来，本地优先。
 
   - 只监听 127.0.0.1（本机回环），不对局域网/外网开放。
   - 页面、样式、脚本全部内联在 index.html 里，不加载任何 CDN、字体、
@@ -16,6 +16,16 @@
       GET  /api/ping?s=xx    -> 窗口心跳（app_native 判断窗口是否还活着）
       POST /api/scan         -> {"demo": true} 或 {"path": "文件夹路径"}
                                  （全局扫描锁，正在扫描时返回 409 busy）
+
+  3.4.0 复核表接口（见 face_review.py；只改单脸归属，绝不删照片）：
+      GET  /api/review/list          -> 三卡片 + 人物 + 计数 + 阈值说明
+      GET  /api/review/history       -> 持久撤销面板用的操作历史
+      GET  /api/review/crop?k=&size= -> 单脸裁剪小图（动态裁剪 + 留白）
+      POST /api/review/act           -> {"action","keys","person_id","name"}
+      POST /api/review/undo          -> {"txn_id","keys"?,"force"?}
+      POST /api/review/names         -> {"person_id","name"} 人名写本机文件
+      POST /api/review/migrate_names -> {"names": {...}} 一次性迁移旧名
+
       POST /api/delete       -> {"items": [{"id", "source_dir"}],
                                  "confirmed": true}
                                  （必须二次确认；只走回收站或隔离区，
@@ -56,7 +66,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "3.3.0"
+VERSION = "3.4.0"
 
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 if TOOL_DIR not in sys.path:
@@ -78,8 +88,13 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 MAX_BODY = 1024 * 1024
 PICK_TIMEOUT = 600  # 选文件夹对话框最长等 10 分钟，超时就干净放弃
 
-STATE = {"root": None, "result": None}
+STATE = {"root": None, "result": None, "review_vectors": {}}
 STATE_LOCK = threading.Lock()
+# 3.4.0：复核表的写入串行化（读文件 -> 改 -> 写回），避免两个请求互相覆盖。
+REVIEW_LOCK = threading.Lock()
+# 单脸裁剪小图的进程内缓存：key -> (bytes, meta)
+_CROP_CACHE = {}
+_CROP_CACHE_MAX = 400
 SCAN_LOCK = threading.Lock()      # P1-1：同一时刻只允许一轮扫描
 PICK_LOCK = threading.Lock()      # 防止连点“浏览”弹出多个对话框
 SHUTDOWN_EVENT = threading.Event()  # P0-3：app_native 主线程监听它退出
@@ -130,6 +145,109 @@ def find_manifest(root):
                  os.path.join(root, "faces_manifest.json")):
         if os.path.exists(cand):
             return cand
+    return None
+
+
+# ---------------------------------------------------------------- 3.4.0 复核表
+
+def review_paths():
+    """复核数据文件与特征缓存文件都放在可写目录（与日志/隔离区同一处）。"""
+    base = app_paths.writable_dir() if app_paths is not None else TOOL_DIR
+    return (os.path.join(base, "face_review.json"),
+            os.path.join(base, "face_embed_cache.json"))
+
+
+def load_review_store(face_review):
+    store_path, _cache = review_paths()
+    return face_review.load_store(store_path), store_path
+
+
+def current_review(face_review, store, note=None):
+    """用当前扫描结果 + 本机记录生成一份复核表视图。"""
+    with STATE_LOCK:
+        result = STATE["result"]
+        vectors = dict(STATE["review_vectors"])
+    if not result:
+        return None
+    return face_review.build_review(store, result, vectors, note_extra=note)
+
+
+def _refresh_review_clusters(store):
+    """P1-2：忽略/撤销忽略后立刻重算自动簇，不用等下次全盘重扫。
+
+    只在真实特征向量链路（embedding_dbscan）下做：演示假数据的簇是
+    按固定计划造的，重算会改簇 id；演示下忽略只走复核表状态过滤，
+    簇等下次重扫再更新。返回 True 表示已重算。
+    """
+    with STATE_LOCK:
+        result = STATE.get("result")
+        vectors = dict(STATE.get("review_vectors") or {})
+    if not result or result.get("face_method") != "embedding_dbscan":
+        return False
+    try:
+        import face_clustering
+        import face_review
+    except Exception:
+        return False
+    ignore = face_review.ignored_keys(store)
+    seen = set()
+    faces = []
+    for face in result.get("face_faces") or []:
+        key = face.get("key")
+        if not key or key in ignore or key in seen:
+            continue
+        seen.add(key)
+        faces.append(face)
+    try:
+        clusters = face_clustering._cluster_face_keys(faces, vectors)
+    except Exception:
+        return False
+    groups = []
+    for cluster in clusters:
+        cid = cluster["cluster_id"]
+        groups.append({
+            "id": cid,
+            "label": "人物 %s" % cid[3:],
+            "method": "embedding_dbscan",
+            "note": result.get("face_note") or "",
+            "members": list(cluster["image_ids"]),
+            "anchor_key": cluster.get("anchor_key"),
+            "face_count": cluster.get("size"),
+        })
+    with STATE_LOCK:
+        if STATE.get("result") is result:
+            result["face_clusters"] = clusters
+            result["face_groups"] = groups
+    return True
+
+
+def _touches_ignored(items):
+    """一次复核操作有没有动过“忽略”状态（忽略或撤销忽略都算）。"""
+    for it in items or []:
+        before = it.get("before") or {}
+        after = it.get("after") or {}
+        if before.get("state") == "ignored" or after.get("state") == "ignored":
+            return True
+    return False
+
+
+def review_payload(face_review, store, extra=None):
+    body = current_review(face_review, store) or {
+        "ok": False, "error": "请先扫描一个文件夹"}
+    body["history"] = face_review.history_view(store)
+    store_file, cache_file = review_paths()
+    body["store_file"] = store_file
+    body["cache_file"] = cache_file
+    body["migration"] = store.get("migration") or {}
+    if extra:
+        body.update(extra)
+    return body
+
+
+def find_face(result, key):
+    for face in result.get("face_faces") or []:
+        if face.get("key") == key:
+            return face
     return None
 
 
@@ -318,6 +436,15 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/pick_folder":
             self.send_json(pick_folder())
             return
+        if path == "/api/review/list":
+            self._handle_review_list()
+            return
+        if path == "/api/review/history":
+            self._handle_review_history()
+            return
+        if path == "/api/review/crop":
+            self._handle_review_crop(parsed)
+            return
         if path == "/api/semantic/status":
             self._handle_semantic_status(parsed)
             return
@@ -435,9 +562,20 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 started = time.monotonic()
                 import scan as scan_mod
-                result = scan_mod.scan(root, 85, manifest)
+                import face_review
+                store_path, cache_path = review_paths()
+                store = face_review.load_store(store_path)
+                vectors = {}
+                result = scan_mod.scan(
+                    root, 85, manifest,
+                    face_cache_path=cache_path,
+                    ignore_keys=face_review.ignored_keys(store),
+                    demo=bool(body.get("demo")),
+                    vectors_out=vectors)
                 result["scan_seconds"] = round(time.monotonic() - started, 2)
                 result["tool_version"] = VERSION
+                face_review.sync_scan(store, result.get("face_faces") or [])
+                face_review.save_store(store_path, store)
             except Exception as e:
                 self.send_json({"error": "扫描失败：%s" % e}, 500)
                 return
@@ -446,10 +584,24 @@ class Handler(BaseHTTPRequestHandler):
             with STATE_LOCK:
                 STATE["root"] = root
                 STATE["result"] = result
+                STATE["review_vectors"] = vectors
+            _CROP_CACHE.clear()  # 重扫后脸框可能变了，裁剪缓存整批作废
             self.send_json(result)
             return
         if path == "/api/delete":
             self._handle_delete()
+            return
+        if path == "/api/review/act":
+            self._handle_review_act()
+            return
+        if path == "/api/review/undo":
+            self._handle_review_undo()
+            return
+        if path == "/api/review/names":
+            self._handle_review_names()
+            return
+        if path == "/api/review/migrate_names":
+            self._handle_review_migrate_names()
             return
         if path in ("/api/index/build", "/api/index/pause", "/api/index/cancel"):
             self._handle_index(path)
@@ -630,6 +782,222 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json({"error": "保存设置失败：%s" % e}, 500)
 
+    # ---- 3.4.0 复核表 ----
+    def _review_store(self):
+        import face_review
+        return face_review
+
+    def _handle_review_list(self):
+        try:
+            face_review = self._review_store()
+        except Exception as e:
+            self.send_json({"error": "复核模块不可用：%s" % e}, 500)
+            return
+        store, _path = load_review_store(face_review)
+        body = review_payload(face_review, store)
+        if not body.get("ok"):
+            self.send_json({"error": body.get("error") or "请先扫描一个文件夹"},
+                           400)
+            return
+        self.send_json(body)
+
+    def _handle_review_history(self):
+        try:
+            face_review = self._review_store()
+        except Exception as e:
+            self.send_json({"error": "复核模块不可用：%s" % e}, 500)
+            return
+        store, _path = load_review_store(face_review)
+        self.send_json({"ok": True, "history": face_review.history_view(store),
+                        "migration": store.get("migration") or {}})
+
+    def _handle_review_crop(self, parsed):
+        qs = parse_qs(parsed.query)
+        key = (qs.get("k") or [""])[0]
+        try:
+            size = int((qs.get("size") or ["168"])[0])
+        except (TypeError, ValueError):
+            size = 168
+        size = max(48, min(400, size))
+        with STATE_LOCK:
+            result, root = STATE["result"], STATE["root"]
+        if not result or not root:
+            self.send_json({"error": "请先扫描一个文件夹"}, 400)
+            return
+        face = find_face(result, key)
+        if face is None:
+            self.send_json({"error": "找不到这张脸（可能已重扫）"}, 404)
+            return
+        cache_key = (key, size)
+        hit = _CROP_CACHE.get(cache_key)
+        if hit is not None:
+            data, _meta = hit
+        else:
+            import face_review
+            full = resolve_in_root(root, face.get("relative_path"))
+            if full is None or not os.path.isfile(full):
+                self.send_json({"error": "原图不存在或不在本次扫描范围内"}, 404)
+                return
+            try:
+                data, meta = face_review.crop_face(full, face.get("box"),
+                                                   size=size)
+            except Exception as e:
+                self.send_json({"error": "裁剪失败：%s" % e}, 500)
+                return
+            if len(_CROP_CACHE) > _CROP_CACHE_MAX:
+                _CROP_CACHE.clear()
+            _CROP_CACHE[cache_key] = (data, meta)
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "private, max-age=120")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _review_common(self):
+        """act/undo/names 的公共前置：取 store、当前扫描结果与向量。"""
+        import face_review
+        store, store_path = load_review_store(face_review)
+        with STATE_LOCK:
+            result = STATE["result"]
+            vectors = dict(STATE["review_vectors"])
+        if not result:
+            return None, None, None, None, "请先扫描一个文件夹"
+        face_review.sync_scan(store, result.get("face_faces") or [])
+        return face_review, store, store_path, (result, vectors), None
+
+    def _handle_review_act(self):
+        body = self.read_json()
+        if body is None:
+            self.send_json({"error": "请求体不是合法 JSON"}, 400)
+            return
+        action = body.get("action")
+        keys = body.get("keys")
+        if not isinstance(keys, list):
+            keys = [body.get("key")] if body.get("key") else []
+        with REVIEW_LOCK:
+            face_review, store, store_path, payload, err = self._review_common()
+            if err:
+                self.send_json({"error": err}, 400)
+                return
+            result, vectors = payload
+            try:
+                out = face_review.apply_action(
+                    store, action, keys, result, vectors,
+                    person_id=body.get("person_id"), name=body.get("name"))
+            except ValueError as e:
+                self.send_json({"error": str(e)}, 400)
+                return
+            except Exception as e:
+                self.send_json({"error": "复核操作失败：%s" % e}, 500)
+                return
+            if _touches_ignored((out.get("txn") or {}).get("items")):
+                _refresh_review_clusters(store)
+            face_review.save_store(store_path, store)
+            body_out = review_payload(face_review, store, {
+                "txn": out.get("txn"),
+                "created_persons": out.get("created_persons") or [],
+                "unresolved": out.get("unresolved") or [],
+            })
+        self.send_json(body_out)
+
+    def _handle_review_undo(self):
+        body = self.read_json()
+        if body is None:
+            self.send_json({"error": "请求体不是合法 JSON"}, 400)
+            return
+        txn_id = body.get("txn_id")
+        if not txn_id:
+            self.send_json({"error": "缺少 txn_id"}, 400)
+            return
+        keys = body.get("keys")
+        only_keys = keys if isinstance(keys, list) and keys else None
+        with REVIEW_LOCK:
+            face_review, store, store_path, payload, err = self._review_common()
+            if err:
+                self.send_json({"error": err}, 400)
+                return
+            try:
+                out = face_review.undo(store, txn_id, only_keys=only_keys,
+                                       force=bool(body.get("force")))
+            except ValueError as e:
+                self.send_json({"error": str(e)}, 400)
+                return
+            except Exception as e:
+                self.send_json({"error": "撤销失败：%s" % e}, 500)
+                return
+            if out.get("conflict"):
+                # 不静默覆盖：把冲突清单交回前端，让用户先处理最新记录。
+                self.send_json(out, 409)
+                return
+            txn = None
+            for item in store.get("history") or []:
+                if item.get("txn_id") == txn_id:
+                    txn = item
+                    break
+            if txn is not None and _touches_ignored(txn.get("items")):
+                _refresh_review_clusters(store)
+            face_review.save_store(store_path, store)
+            body_out = review_payload(face_review, store, {"undo": out})
+        self.send_json(body_out)
+
+    def _handle_review_names(self):
+        body = self.read_json()
+        if body is None:
+            self.send_json({"error": "请求体不是合法 JSON"}, 400)
+            return
+        person_id = body.get("person_id")
+        if not person_id:
+            self.send_json({"error": "缺少 person_id"}, 400)
+            return
+        with REVIEW_LOCK:
+            face_review, store, store_path, payload, err = self._review_common()
+            if err:
+                self.send_json({"error": err}, 400)
+                return
+            result, vectors = payload
+            try:
+                out = face_review.apply_action(
+                    store, "rename", [], result, vectors,
+                    person_id=person_id, name=body.get("name"))
+            except ValueError as e:
+                self.send_json({"error": str(e)}, 400)
+                return
+            face_review.save_store(store_path, store)
+            body_out = review_payload(face_review, store,
+                                      {"txn": out.get("txn")})
+        self.send_json(body_out)
+
+    def _handle_review_migrate_names(self):
+        body = self.read_json()
+        if body is None:
+            self.send_json({"error": "请求体不是合法 JSON"}, 400)
+            return
+        names = body.get("names")
+        if not isinstance(names, dict):
+            self.send_json({"error": "names 必须是对象"}, 400)
+            return
+        with REVIEW_LOCK:
+            # 人名迁移不依赖当前扫描：哪怕还没扫描/扫描刚被另一个请求占用，
+            # 也要能把浏览器里的旧名安全搬进本机数据文件，不能丢。
+            face_review = self._review_store()
+            store, store_path = load_review_store(face_review)
+            with STATE_LOCK:
+                result = STATE["result"] or {}
+            counts = {}
+            for cluster in result.get("face_clusters") or []:
+                counts[cluster["cluster_id"]] = cluster.get("size") or 0
+            for group in result.get("face_groups") or []:
+                counts.setdefault(group["id"], len(group.get("members") or []))
+            try:
+                out = face_review.migrate_names(store, names, counts)
+            except Exception as e:
+                self.send_json({"error": "迁移失败：%s" % e}, 500)
+                return
+            face_review.save_store(store_path, store)
+            body_out = review_payload(face_review, store, {"migration_result": out})
+        self.send_json(body_out)
+
     def _handle_delete(self):
         body = self.read_json()
         if body is None:
@@ -751,7 +1119,7 @@ def pick_port(preferred):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="Shiying-3.3.0 本地服务（仅监听 127.0.0.1）")
+        description="Shiying-3.4.0 本地服务（仅监听 127.0.0.1）")
     ap.add_argument("--port", type=int, default=0,
                     help="指定端口（默认自动在 8765~8774 间选空闲端口）")
     ap.add_argument("--no-open", action="store_true",

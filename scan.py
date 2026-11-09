@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""本地扫描脚本（3.3.0；扫描逻辑与 3.2.0 相同）：扫描指定文件夹，输出 scan_result.json。
+"""本地扫描脚本（3.4.0；扫描逻辑与 3.2.0 相同）：扫描指定文件夹，输出 scan_result.json。
 
 本文件是阶段二 scan.py 的阶段三修订版（阶段二原文件未动，修订版只活在
 tool/ 里）。相对阶段二，阶段三按 Argon 审查结论改了以下 5 项：
@@ -230,7 +230,17 @@ def try_haar(images, root):
         return 0, False
 
 
-def scan(root, similar_threshold, manifest_path):
+def scan(root, similar_threshold, manifest_path, face_cache_path=None,
+         ignore_keys=None, demo=False, vectors_out=None):
+    """扫描一个文件夹，返回 scan_result 字典。
+
+    3.4.0 新增参数（都为可选，不影响原有调用）：
+      face_cache_path：128 维人脸特征落盘缓存文件，重扫复用不重算；
+      ignore_keys：已人工忽略的单脸主键，聚类前就剔除；
+      demo：本次扫的是演示图，缺少人脸模型时可用假数据演练复核表；
+      vectors_out：由调用方传入的 dict，单脸特征向量回填到这里，
+                   绝不写进返回的 JSON（前端不需要、也不该拿到）。
+    """
     images = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames.sort()
@@ -419,13 +429,30 @@ def scan(root, similar_threshold, manifest_path):
                     "opencv_available": haar_available,
                     "detail": "未尝试特征向量聚类（face_clustering 模块不可用）。"}
     embedding_groups = []
+    analysis = None
+    fixture_used = False
+    vectors = vectors_out if vectors_out is not None else {}
     try:
         import face_clustering
         face_attempt = face_clustering.attempt_report()
         # 3.2.0：dlib 路线已彻底放弃；只有 YuNet+SFace 特征向量
         # 路线可用（embedding_available）时才尝试真实聚类。
         if face_attempt.get("embedding_available"):
-            embedding_groups = face_clustering.cluster_faces(ok, root)
+            analysis = face_clustering.analyze_faces(
+                ok, root, ignore_keys=ignore_keys, cache_path=face_cache_path)
+            vectors.update(analysis.get("vectors") or {})
+            if analysis.get("clusters"):
+                for cluster in analysis["clusters"]:
+                    cid = cluster["cluster_id"]
+                    embedding_groups.append({
+                        "id": cid,
+                        "label": "人物 %s" % cid[3:],
+                        "method": "embedding_dbscan",
+                        "note": analysis.get("reason", ""),
+                        "members": list(cluster["image_ids"]),
+                        "anchor_key": cluster.get("anchor_key"),
+                        "face_count": cluster.get("size"),
+                    })
     except Exception as e:
         face_attempt = {"face_recognition_available": False,
                         "embedding_available": False,
@@ -436,6 +463,22 @@ def scan(root, similar_threshold, manifest_path):
                         "insightface_available": False,
                         "opencv_available": haar_available,
                         "detail": "特征向量聚类尝试失败：%s" % e}
+    # 3.4.0：演示图 + 缺模型时，用固定比例的假脸框与假特征演练复核表。
+    # 只对演示目录生效，并且全程标注 demo_fixture，绝不冒充真实识别。
+    # 2026-11-09 补：真实检测跑通但一张脸都没检出时也走假数据——演示图
+    # 是卡通画，YuNet 认不出，检出 0 张就等于复核表演示是空的；只有
+    # 真实检测到脸时才用真实结果。真实文件夹扫描不受这条影响。
+    if demo and (analysis is None or not analysis.get("available")
+                 or not (analysis.get("faces") or [])):
+        try:
+            import face_review
+            analysis = face_review.demo_fixture(ok, ignore_keys=ignore_keys)
+            vectors.update(analysis.get("vectors") or {})
+            fixture_used = True
+        except Exception as e:
+            analysis = None
+            face_attempt["detail"] = (face_attempt.get("detail", "") +
+                                      "；演示假数据生成失败：%s" % e)
     manifest = {}
     if manifest_path and os.path.exists(manifest_path):
         with open(manifest_path, encoding="utf-8") as f:
@@ -468,6 +511,22 @@ def scan(root, similar_threshold, manifest_path):
         face_method = "none"
         face_note = ("特征向量聚类不可用，且无测试分组 sidecar，"
                      "故无人脸分组；Haar 只能检测不能认人，未用于身份分组。")
+
+    # ---- 3.4.0 复核表数据（单脸级）----
+    face_faces = (analysis or {}).get("faces") or []
+    face_clusters = (analysis or {}).get("clusters") or []
+    if fixture_used:
+        face_review_note = ("演示假数据：基线包不含人脸模型，复核表里的脸框、"
+                            "相似度与特征都是固定比例的演练数据（method="
+                            "demo_fixture），不是真实人脸识别结果。")
+    elif face_faces:
+        face_review_note = ("单脸主键 = 照片内容哈希 + 脸序号；特征向量已缓存，"
+                            "重扫不重算；已忽略的脸在聚类前已剔除。")
+    elif not face_attempt.get("embedding_available"):
+        face_review_note = ("本机没有可用的人脸模型（models/ 里的 YuNet 与 "
+                            "SFace），复核表为空；装好模型后重扫即可出现待复核脸。")
+    else:
+        face_review_note = "本次扫描没有检出人脸，复核表为空。"
 
     # ---- P1-1 推荐保留：多维评分 ----
     # 顺序：像素总面积最大 > EXIF 完整 > 彩色优先（P1-2）> 文件名干净 >
@@ -552,6 +611,12 @@ def scan(root, similar_threshold, manifest_path):
         "face_method": face_method,
         "face_note": face_note,
         "face_attempt": face_attempt,
+        "face_review_note": face_review_note,
+        "face_fixture": bool(fixture_used),
+        "face_analysis_available": bool((analysis or {}).get("available")),
+        "face_faces": face_faces,
+        "face_clusters": face_clusters,
+        "face_stats": ((analysis or {}).get("stats") or {}),
         "haar_available": haar_available,
         "haar_faces_detected": haar_count,
         "thumbnail_note": "缩略图改走 /api/thumb 动态接口加懒加载，"
