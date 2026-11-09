@@ -18,9 +18,9 @@ jobs:
           pip install pyinstaller pywebview
       - name: Build with PyInstaller (onedir, windowed)
         run: |
-          pyinstaller --noconfirm --windowed --onedir --name Shiying-3.3.0 --add-data "index.html;." --add-data "demo_images;demo_images" --add-data "faces_manifest.json;." --add-data "models;models" --hidden-import app_paths --hidden-import scan --hidden-import face_clustering --hidden-import trash_util --hidden-import instance_lock --hidden-import semantic_search --hidden-import api_rerank --hidden-import onnxruntime app_native.py
+          pyinstaller --noconfirm --windowed --onedir --name Shiying-3.4.0 --add-data "index.html;." --add-data "demo_images;demo_images" --add-data "faces_manifest.json;." --add-data "models;models" --hidden-import app_paths --hidden-import scan --hidden-import face_clustering --hidden-import face_review --hidden-import trash_util --hidden-import instance_lock --hidden-import semantic_search --hidden-import api_rerank --hidden-import onnxruntime app_native.py
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Shiying-3.3.0-win64
-          path: dist/Shiying-3.3.0
+          name: Shiying-3.4.0-win64
+          path: dist/Shiying-3.4.0
